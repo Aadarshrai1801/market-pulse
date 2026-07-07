@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MarketPulse · UAE Produce Prices</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+</head>
+
+<body>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-logo">🌿</div>
+      <div class="brand-text">
+        <div class="brand-name">MARKETPULSE</div>
+        <div class="brand-sub">UAE FRESH PRODUCE</div>
+      </div>
+    </div>
+
+    <div class="ticker-outer">
+      <div class="ticker-track" id="tickerTrack"></div>
+    </div>
+
+    <div class="topbar-actions">
+      <button class="btn-sync" id="syncBtn" type="button"><span class="spin-ico">⟳</span> Sync</button>
+      <span class="live-pill"><span class="live-dot"></span>LIVE</span>
+      <span class="date-pill" id="dateChip">—</span>
+      <span class="admin-pill">RRR <b>ADMIN</b></span>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+    <nav class="tabs" id="tabs">
+      <button class="tab-btn active" data-tab="fetch">⚡ FETCH &amp; ANALYSE</button>
+      <button class="tab-btn" data-tab="products">🧩 PRODUCTS</button>
+      <button class="tab-btn" data-tab="images">⌨ IMPORT IMAGES</button>
+      <button class="tab-btn" data-tab="variation">☑ PRICE VARIATION</button>
+      <button class="tab-btn" data-tab="scheduler">⏰ SCHEDULER</button>
+    </nav>
+
+    <section class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon">🏬</div>
+        <div class="stat-num" id="sRetailers">—</div>
+        <div class="stat-label">Retailers</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">🥦</div>
+        <div class="stat-num" id="sProducts">—</div>
+        <div class="stat-label">Products Tracked</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">📅</div>
+        <div class="stat-num" id="sDates">—</div>
+        <div class="stat-label">Dates in Analysis</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">📊</div>
+        <div class="stat-num" id="sTotal">—</div>
+        <div class="stat-label">Total Data Points</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">💰</div>
+        <div class="stat-num" id="sAvg">—</div>
+        <div class="stat-label">Avg Price AED/kg</div>
+      </div>
+    </section>
+
+    <section class="source-card" id="sourceCard">
+      <div class="source-top">
+        <span class="source-title">🐍 PYTHON SCRAPER BACKEND</span>
+        <span class="source-pill" id="sourcePill">checking…</span>
+      </div>
+      <p class="source-desc">
+        Prices are fetched directly by your <code>scraper.py</code> script running on the Flask backend — no Anthropic
+        API key required, nothing is stored in the browser.
+        <button class="link-btn" id="testConnBtn" type="button">Test connection →</button>
+      </p>
+    </section>
+
+    <!-- ===================== FETCH & ANALYSE ===================== -->
+    <section class="tab-panel active" id="tab-fetch">
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Fetch Controls</div>
+            <div class="panel-sub">Configure then fetch</div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <div class="field">
+            <div class="field-label">Retailer</div>
+            <button class="dd-btn" id="retailerBtn" type="button">
+              <span id="retailerLabel">All Retailers</span>
+              <span class="chev">▾</span>
+            </button>
+            <div class="dd-panel" id="retailerPanel"></div>
+          </div>
+
+          <div class="field">
+            <div class="field-label">Product Filter</div>
+            <button class="dd-btn" id="productBtn" type="button">
+              <span id="productLabel">All Configured Products</span>
+              <span class="chev">▾</span>
+            </button>
+            <div class="dd-panel" id="productPanel"></div>
+          </div>
+
+          <button class="fetch-btn" id="fetchBtn" type="button">▶ Fetch Prices</button>
+          <button class="ghost-btn" id="fetchCsvBtn" type="button">↓ CSV</button>
+          <button class="ghost-btn" id="fetchCopyBtn" type="button">⎘ Copy</button>
+        </div>
+
+        <div class="status-line" id="statusLine">Ready — click Fetch Prices to load today's AED prices</div>
+        <div class="error-list" id="errorList"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Multi-Date Price Analysis</div>
+            <div class="panel-sub" id="summaryLine">— dates · — products · — retailers · AED per kg</div>
+          </div>
+          <div class="panel-actions">
+            <button class="ghost-btn" id="pivotCsvBtn" type="button">↓ CSV</button>
+            <button class="ghost-btn" id="pivotCopyBtn" type="button">⎘ Copy</button>
+          </div>
+        </div>
+
+        <div class="table-scroll">
+          <table id="priceTable">
+            <thead>
+              <tr id="headRow"></tr>
+            </thead>
+            <tbody id="bodyRows"></tbody>
+          </table>
+          <div class="empty-state" id="emptyState">
+            No price history yet. Pick a retailer/product (or leave on "All") and hit
+            <b>Fetch Prices</b> to run the scraper and start building the table.
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" id="detailPanel" style="display:none;">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Latest Fetch Results</div>
+            <div class="panel-sub" id="detailSub">—</div>
+          </div>
+          <div class="panel-actions">
+            <button class="ghost-btn" id="detailCsvBtn" type="button">↓ CSV</button>
+            <button class="ghost-btn" id="detailCopyBtn" type="button">⎘ Copy</button>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <div id="detailWrap"></div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ===================== PRODUCTS ===================== -->
+    <section class="tab-panel" id="tab-products">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Tracked Products</div>
+            <div class="panel-sub">These are the products the scraper looks for at each retailer</div>
+          </div>
+          <div class="panel-actions">
+            <button class="ghost-btn" id="btnResetProducts" type="button">Reset to defaults</button>
+          </div>
+        </div>
+        <div class="prod-tags" id="prodTags"></div>
+
+        <div class="add-product-row">
+          <input class="text-input" id="newEmoji" placeholder="🛒" maxlength="4">
+          <input class="text-input grow" id="newName" placeholder="Add a product name…">
+          <button class="fetch-btn" id="btnAddProduct" type="button">+ Add</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Quick Presets</div>
+            <div class="panel-sub">Click to add to your tracked list</div>
+          </div>
+        </div>
+        <div class="preset-row" id="presetRow"></div>
+      </div>
+    </section>
+
+    <!-- ===================== IMPORT IMAGES ===================== -->
+    <section class="tab-panel" id="tab-images">
+      <div class="panel">
+        <div class="panel-title">Import Images</div>
+        <div class="panel-sub" style="margin-top:6px;">
+          Not wired up yet — this used to run through the Anthropic API for OCR-style price extraction from
+          screenshots. Since prices now come straight from your Python scraper, you likely don't need this tab
+          unless you want to bulk-import prices from receipt/shelf photos. Let me know if you want it built against
+          your backend.
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== PRICE VARIATION ===================== -->
+    <section class="tab-panel" id="tab-variation">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Price Variation</div>
+            <div class="panel-sub" id="varSub">Last 30 days</div>
+          </div>
+          <div class="panel-actions">
+            <button class="ghost-btn" id="btnExportVariation" type="button">↓ CSV</button>
+          </div>
+        </div>
+
+        <div class="controls controls-3">
+          <div class="field">
+            <div class="field-label">Retailer</div>
+            <select class="select-input" id="varRetailer">
+              <option value="all">All Retailers</option>
+            </select>
+          </div>
+          <div class="field">
+            <div class="field-label">Product</div>
+            <select class="select-input" id="varProduct">
+              <option value="all">All Products</option>
+            </select>
+          </div>
+          <div class="field">
+            <div class="field-label">Chart Type</div>
+            <select class="select-input" id="varChartType">
+              <option value="line">Line</option>
+              <option value="bar">Bar</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="var-summary">
+          <div class="var-sum-item up"><span id="vs-up">0</span> rising</div>
+          <div class="var-sum-item down"><span id="vs-down">0</span> falling</div>
+          <div class="var-sum-item flat"><span id="vs-flat">0</span> stable</div>
+          <div class="var-sum-item"><span id="vs-dates">0</span> dates</div>
+        </div>
+
+        <div style="position:relative;height:260px;margin-top:16px;">
+          <canvas id="overviewChart"></canvas>
+        </div>
+      </div>
+
+      <div class="var-grid" id="varChartsGrid"></div>
+
+      <div class="panel" id="varTableCard" style="display:none;">
+        <div class="panel-title">Detail Table</div>
+        <div class="table-scroll" style="margin-top:12px;">
+          <div id="varTableBody"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== SCHEDULER ===================== -->
+    <section class="tab-panel" id="tab-scheduler">
+      <div class="panel">
+        <div class="panel-title">Scheduler</div>
+        <div class="panel-sub" style="margin-top:6px;">
+          Not wired up yet. The natural way to add this is a periodic job (cron, APScheduler, or a Celery beat task)
+          on the Flask backend that calls the same routine <code>/api/jobs</code> uses to run <code>scraper.py</code>
+          on an interval, so this tab would just show recent run history and let you edit the schedule.
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+
+</html>
