@@ -1,5 +1,5 @@
 import {
-  appState, loadState, saveState, setStatus, escapeHtml, formatPrice, flag,
+  appState, loadState, saveState, setStatus, escapeHtml, formatPrice, flag, countryCode, normalizeCountryName,
   createRetailerPill, getProductMeta, normalizeRetailerId, normalizeProductId,
 } from './utils.js';
 import {
@@ -164,12 +164,13 @@ function flattenPivot(payload) {
   const rows = [];
   (payload.rows || []).forEach((row) => {
     Object.entries(row.prices || {}).forEach(([date, price]) => {
+      const rawOrigin = row.origins?.[date] ?? row.origin_country ?? row.originCountry ?? row.country ?? row.origin ?? '—';
       rows.push({
         date,
         retailer: row.retailer_id || row.retailer_label || 'unknown',
         product: row.product_id || row.product_label || 'unknown',
         price: Number(price) || 0,
-        origin_country: row.origin_country ?? row.originCountry ?? row.country ?? row.origin ?? '—',
+        origin_country: normalizeCountryName(rawOrigin),
       });
     });
   });
@@ -232,7 +233,6 @@ function renderPivotTable(data) {
   groups.forEach((groupRows) => {
     groupRows.forEach((row, idx) => {
       const tr = document.createElement('tr');
-      const origin = row.origin_country ?? row.originCountry ?? row.country ?? row.origin ?? '';
 
       if (idx === 0) {
         const productCell = document.createElement('td');
@@ -250,13 +250,19 @@ function renderPivotTable(data) {
       dates.forEach((iso) => {
         const td = document.createElement('td');
         const value = row.prices[iso];
+        // origin can differ day to day, so look it up per-date rather than
+        // once per row; falls back to a row-level field for older data shapes.
+        const origin = normalizeCountryName(
+          row.origins?.[iso] ?? row.origin_country ?? row.originCountry
+          ?? row.country ?? row.origin ?? row.country_of_origin ?? row.countryOfOrigin ?? ''
+        );
         if (value === undefined || value === null) {
           td.className = 'empty price-cell';
           td.textContent = '—';
         } else {
           td.className = 'price-cell';
           td.innerHTML = `<div class="price-num">${Number(value).toFixed(2)}</div>` +
-            (origin ? `<div class="price-country">${flag(origin)} ${escapeHtml(origin)}</div>` : '');
+            (origin && origin !== '—' ? `<div class="price-country" title="${escapeHtml(origin)}"><span class="origin-code">${escapeHtml(countryCode(origin))}</span></div>` : '');
         }
         tr.appendChild(td);
       });
@@ -371,7 +377,7 @@ function renderDetailTable(rows) {
         <td>${createRetailerPill(item.retailer)}</td>
         <td>${priceCell}</td>
         <td class="mu">per kg</td>
-        <td><span style="font-size:15px;margin-right:5px;">${flag(item.origin_country)}</span><span class="mu">${escapeHtml(item.origin_country || '—')}</span></td>
+        <td><span style="font-size:15px;margin-right:5px;">${flag(item.origin_country)}</span><span class="mu">${escapeHtml(normalizeCountryName(item.origin_country) || '—')}</span></td>
         <td class="mu">${escapeHtml(item.fetched_at ? new Date(item.fetched_at).toLocaleTimeString('en-AE') : '—')}</td>
       </tr>`;
     }).join('') + '</tbody></table>';
@@ -476,7 +482,7 @@ function pivotToCsv() {
 function detailToCsv() {
   if (!lastDetail.length) return '';
   const headers = ['Date', 'Product', 'Retailer', 'Price (AED)', 'Unit', 'Origin Country', 'Fetched At'];
-  const rows = lastDetail.map((r) => [r.date, r.product, r.retailer, (r.price || 0).toFixed(2), r.unit || 'per kg', r.origin_country || '—', r.fetched_at || '']);
+  const rows = lastDetail.map((r) => [r.date, r.product, r.retailer, (r.price || 0).toFixed(2), r.unit || 'per kg', normalizeCountryName(r.origin_country) || '—', r.fetched_at || '']);
   return toCsv(headers, rows);
 }
 
@@ -598,7 +604,7 @@ function buildVariationTable(dates, retailers, products, lookup) {
         const pct = ((latest.price - previous.price) / previous.price) * 100;
         change = `${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`;
       }
-      rows.push([productId, retailerId, latest?.origin_country || '', ...prices, change]);
+      rows.push([productId, retailerId, normalizeCountryName(latest?.origin_country) || '', ...prices, change]);
     });
   });
   const header = ['Product', 'Retailer', 'Origin Country', ...dates, 'Change %'];

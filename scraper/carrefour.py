@@ -17,6 +17,45 @@ from .utils import launch_stealth_browser
 SITE = "carrefour"
 
 
+def _parse_pack_size_to_kg(text):
+    """
+    Parses a pack-size string such as '500g', '1kg', '1.5 kg', '6x200g',
+    '750ml', or '1L' into an equivalent weight in kilograms.
+
+    Liquids (l/ml) are treated as 1:1 with kg (density ~1, e.g. water/milk) -
+    this is an approximation and will be off for dense or light liquids
+    (oil, honey, etc.), so treat converted liquid per-kg prices as indicative.
+
+    Returns None if the text can't be confidently parsed.
+    """
+    if not text:
+        return None
+
+    cleaned = text.strip().lower().replace(' ', '')
+
+    # multi-pack, e.g. "6x200g" -> 6 * 200g
+    multipack_match = re.match(r'^(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)(kg|g|l|ml)$', cleaned)
+    if multipack_match:
+        count_str, amount_str, unit = multipack_match.groups()
+        total = float(count_str) * float(amount_str)
+    else:
+        single_match = re.match(r'^(\d+(?:\.\d+)?)(kg|g|l|ml)$', cleaned)
+        if not single_match:
+            return None
+        amount_str, unit = single_match.groups()
+        total = float(amount_str)
+
+    if unit == 'kg':
+        return total
+    if unit == 'g':
+        return total / 1000
+    if unit == 'l':
+        return total  # approx: 1L ~= 1kg
+    if unit == 'ml':
+        return total / 1000
+    return None
+
+
 def find_url(product_name):
     config = SITE_SEARCH_CONFIG[SITE]
     result_index = config.get("result_index", 0)
@@ -79,16 +118,112 @@ def scrape(url):
 
         body_text = page.locator("body").inner_text()
 
-        # grab prices from the page text
-        prices_found = re.findall(r'AED\s?[\d]+\.\d{2}', body_text)
-        main_price = prices_found[0] if prices_found else None
+        # ---- price extraction ----
+        # Carrefour renders the price as split spans nested INSIDE a
+        # ".force-ltr" wrapper, and that whole thing sits inside an outer
+        # "flex items-baseline" div alongside the per-kg text, e.g.
+        #
+        #   <div class="flex items-baseline">                      <- outer (has BOTH parts)
+        #     <div class="flex items-baseline force-ltr">           <- inner (just the price)
+        #       <div>AED</div><div>1</div><div>.95</div>
+        #     </div>
+        #     <div class="text-gray-600">AED 3.89/Kg</div>          <- explicit per-kg text
+        #   </div>
+        #
+        # We target ".force-ltr" specifically so we don't accidentally pull
+        # the per-kg text into the main-price parts.
+        main_price = None
+        try:
+            price_container = page.locator("div.flex.items-baseline.force-ltr").first
+            if price_container.count() > 0:
+                parts = [part.strip() for part in price_container.locator("div").all_text_contents()]
+                # parts -> ['AED', '1', '.95']
+                if len(parts) >= 3:
+                    currency = parts[0]
+                    integer_part = parts[1]
+                    decimal_part = parts[2].lstrip('.')
+                    if integer_part and decimal_part:
+                        main_price = f"{currency} {integer_part}.{decimal_part}"
+        except Exception:
+            main_price = None
 
-        per_unit = re.findall(
-            r'AED\s?[\d]+\.\d{2}\s?(?:/|per)\s?(?:Kg|kg|g|L|l|ml|Pc|pc)',
-            body_text,
-            re.IGNORECASE
-        )
-        per_unit_price = per_unit[0] if per_unit else None
+        # fallback to plain-text regex if the DOM structure didn't match
+        if not main_price:
+            prices_found = re.findall(r'AED\s?[\d]+\.\d{2}', body_text)
+            main_price = prices_found[0] if prices_found else None
+
+        # ---- per-kg price: prefer Carrefour's own explicit value ----
+        # Right next to the main price, Carrefour often shows its own
+        # pre-computed per-unit price, e.g. "AED 3.89/Kg". That's the
+        # retailer's own calculation (accounts for exact pack weight, taxes,
+        # etc.) so we use it whenever it's present, and only fall back to
+        # deriving one ourselves from Pack Size if it's missing.
+        per_kg_price = None
+        try:
+            gray_divs = page.locator("div.text-gray-600")
+            for i in range(gray_divs.count()):
+                candidate = gray_divs.nth(i).text_content().strip() #type: ignore
+                match = re.search(r'AED\s?([\d]+\.\d{2})\s?/\s?(kg|g|l|ml)', candidate, re.IGNORECASE)
+                if match:
+                    value, unit = match.groups()
+                    unit = unit.lower()
+                    value = float(value)
+                    if unit == 'kg' or unit == 'l':
+                        per_kg_price = f"AED {value:.2f}"
+                    elif unit == 'g' or unit == 'ml':
+                        # normalize a per-gram/per-ml figure up to per-kg/per-litre
+                        per_kg_price = f"AED {value * 1000:.2f}"
+                    break
+        except Exception:
+            per_kg_price = None
+
+        # fallback: search flattened body text for the same "AED x.xx/Kg" pattern
+        if not per_kg_price:
+            explicit_match = re.search(r'AED\s?([\d]+\.\d{2})\s?/\s?(kg|g|l|ml)', body_text, re.IGNORECASE)
+            if explicit_match:
+                value, unit = explicit_match.groups()
+                unit = unit.lower()
+                value = float(value)
+                if unit == 'kg' or unit == 'l':
+                    per_kg_price = f"AED {value:.2f}"
+                elif unit == 'g' or unit == 'ml':
+                    per_kg_price = f"AED {value * 1000:.2f}"
+
+        # ---- pack size extraction (only needed if no explicit per-kg price) ----
+        # Carrefour shows the pack size in its own card, e.g.
+        #   <div class="flex flex-col items-start ...">
+        #     <span>Pack Size</span>
+        #     <div><span class="font-bold ...">500g</span></div>
+        #   </div>
+        # Find the "Pack Size" label, then read the bold value next to it.
+        pack_size_raw = None
+        if not per_kg_price:
+            try:
+                label = page.locator("span", has_text=re.compile(r'^\s*Pack Size\s*$'))
+                if label.count() > 0:
+                    container = label.first.locator("xpath=..")
+                    value_span = container.locator("span.font-bold").first
+                    if value_span.count() > 0:
+                        pack_size_raw = value_span.text_content().strip() #type: ignore
+            except Exception:
+                pack_size_raw = None
+
+            # fallback: search the flattened body text for a pack-size-looking token
+            if not pack_size_raw:
+                pack_match = re.search(
+                    r'Pack Size\s*\n?\s*([\d.]+\s?(?:kg|g|l|ml)|[\d.]+\s?x\s?[\d.]+\s?(?:kg|g|l|ml))',
+                    body_text,
+                    re.IGNORECASE,
+                )
+                pack_size_raw = pack_match.group(1).strip() if pack_match else None
+
+            # ---- convert to per-kg price ourselves, since no explicit value existed ----
+            pack_size_kg = _parse_pack_size_to_kg(pack_size_raw) if pack_size_raw else None
+            price_value_match = re.search(r'[\d]+\.\d{2}', main_price) if main_price else None
+            if price_value_match and pack_size_kg and pack_size_kg > 0:
+                price_value = float(price_value_match.group())
+                per_kg_value = price_value / pack_size_kg
+                per_kg_price = f"AED {per_kg_value:.2f}"
 
         country_of_origin = page.evaluate("""
             () => {
@@ -123,7 +258,9 @@ def scrape(url):
 
         return {
             "product": title,
-            "per_kg_price": per_unit_price,
+            "price": main_price,
+            "pack_size": pack_size_raw,
+            "per_kg_price": per_kg_price,
             "country_of_origin": country_of_origin,
             "url": url,
             "supermarket": "carrefour",

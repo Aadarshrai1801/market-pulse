@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MarketPulse · UAE Produce Prices</title>
+  <title>Intellicrop</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 </head>
@@ -28,7 +28,6 @@
       <button class="btn-sync" id="syncBtn" type="button"><span class="spin-ico">⟳</span> Sync</button>
       <span class="live-pill"><span class="live-dot"></span>LIVE</span>
       <span class="date-pill" id="dateChip">—</span>
-      <span class="admin-pill">RRR <b>ADMIN</b></span>
     </div>
   </header>
 
@@ -42,48 +41,48 @@
       <button class="tab-btn" data-tab="scheduler">⏰ SCHEDULER</button>
     </nav>
 
-    <section class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-icon">🏬</div>
-        <div class="stat-num" id="sRetailers">—</div>
-        <div class="stat-label">Retailers</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon">🥦</div>
-        <div class="stat-num" id="sProducts">—</div>
-        <div class="stat-label">Products Tracked</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon">📅</div>
-        <div class="stat-num" id="sDates">—</div>
-        <div class="stat-label">Dates in Analysis</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon">📊</div>
-        <div class="stat-num" id="sTotal">—</div>
-        <div class="stat-label">Total Data Points</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon">💰</div>
-        <div class="stat-num" id="sAvg">—</div>
-        <div class="stat-label">Avg Price AED/kg</div>
-      </div>
-    </section>
-
-    <section class="source-card" id="sourceCard">
-      <div class="source-top">
-        <span class="source-title">🐍 PYTHON SCRAPER BACKEND</span>
-        <span class="source-pill" id="sourcePill">checking…</span>
-      </div>
-      <p class="source-desc">
-        Prices are fetched directly by your <code>scraper.py</code> script running on the Flask backend — no Anthropic
-        API key required, nothing is stored in the browser.
-        <button class="link-btn" id="testConnBtn" type="button">Test connection →</button>
-      </p>
-    </section>
-
     <!-- ===================== FETCH & ANALYSE ===================== -->
     <section class="tab-panel active" id="tab-fetch">
+
+      <section class="source-card" id="sourceCard">
+        <div class="source-top">
+          <span class="source-title">🐍 PYTHON SCRAPER BACKEND</span>
+          <span class="source-pill" id="sourcePill">checking…</span>
+        </div>
+        <p class="source-desc">
+          Prices are fetched directly by your <code>scraper.py</code> script running on the Flask backend — no Anthropic
+          API key required, nothing is stored in the browser.
+          <button class="link-btn" id="testConnBtn" type="button">Test connection →</button>
+        </p>
+      </section>
+
+      <section class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">🏬</div>
+          <div class="stat-num" id="sRetailers">—</div>
+          <div class="stat-label">Retailers</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">🥦</div>
+          <div class="stat-num" id="sProducts">—</div>
+          <div class="stat-label">Products Tracked</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📅</div>
+          <div class="stat-num" id="sDates">—</div>
+          <div class="stat-label">Dates in Analysis</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📊</div>
+          <div class="stat-num" id="sTotal">—</div>
+          <div class="stat-label">Total Data Points</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">💰</div>
+          <div class="stat-num" id="sAvg">—</div>
+          <div class="stat-label">Avg Price AED/kg</div>
+        </div>
+      </section>
 
       <div class="panel">
         <div class="panel-head">
@@ -170,29 +169,25 @@
       <div class="panel">
         <div class="panel-head">
           <div>
-            <div class="panel-title">Tracked Products</div>
-            <div class="panel-sub">These are the products the scraper looks for at each retailer</div>
+            <div class="panel-title">Product Configuration</div>
+            <div class="panel-sub">Add or remove products · changes apply to next fetch</div>
           </div>
           <div class="panel-actions">
-            <button class="ghost-btn" id="btnResetProducts" type="button">Reset to defaults</button>
+            <button class="ghost-btn" id="btnResetProducts" type="button">↺ Reset Defaults</button>
           </div>
         </div>
+
+        <div class="section-label">Active Products (click × to remove)</div>
         <div class="prod-tags" id="prodTags"></div>
 
+        <div class="section-label section-label-spaced">Add New Product</div>
         <div class="add-product-row">
-          <input class="text-input" id="newEmoji" placeholder="🛒" maxlength="4">
-          <input class="text-input grow" id="newName" placeholder="Add a product name…">
+          <input class="emoji-input" id="newEmoji" placeholder="🛒" maxlength="4">
+          <input class="text-input grow" id="newName" placeholder="e.g. Broccoli, Mango, Dates…">
           <button class="fetch-btn" id="btnAddProduct" type="button">+ Add</button>
         </div>
-      </div>
 
-      <div class="panel">
-        <div class="panel-head">
-          <div>
-            <div class="panel-title">Quick Presets</div>
-            <div class="panel-sub">Click to add to your tracked list</div>
-          </div>
-        </div>
+        <div class="section-label section-label-spaced">Quick Add Presets</div>
         <div class="preset-row" id="presetRow"></div>
       </div>
     </section>

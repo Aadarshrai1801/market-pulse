@@ -1,12 +1,18 @@
 import { appState, DEFAULT_PRODUCTS, PRESETS, saveState, setStatus } from './utils.js';
 
+const TAG_COLORS = ['#3FA7FF', '#4FD1A5', '#F0A63C', '#c19bee', '#E2685E', '#22D3EE', '#f472b6', '#8dd48a'];
+
+function tagColor(index) {
+  return TAG_COLORS[index % TAG_COLORS.length];
+}
+
 export function renderProductTags() {
   const container = document.getElementById('prodTags');
   if (!container) return;
   if (!appState.products.length) {
     container.innerHTML = '<span style="font-size:12px;color:var(--muted);">No products — add below</span>';
   } else {
-    container.innerHTML = appState.products.map((product, index) => `<span class="prod-tag">${product.emoji || '🛒'} ${product.name || product.id}<button class="prod-tag-del" data-index="${index}" title="Remove">×</button></span>`).join('');
+    container.innerHTML = appState.products.map((product, index) => `<span class="prod-tag" style="--tag-color:${tagColor(index)}">${product.emoji || '🛒'} ${product.name || product.id}<button class="prod-tag-del" data-index="${index}" title="Remove">×</button></span>`).join('');
   }
 }
 

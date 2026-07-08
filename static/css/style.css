@@ -85,15 +85,34 @@ body {
     border-left: 1px solid var(--border-soft);
     border-right: 1px solid var(--border-soft);
     padding: 0 18px;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent);
 }
 
 .ticker-track {
-    display: flex;
+    display: inline-flex;
+    width: max-content;
     gap: 34px;
     white-space: nowrap;
     color: var(--dim);
     font-size: 12.5px;
     letter-spacing: 0.03em;
+    animation: ticker-scroll 25s linear infinite;
+    will-change: transform;
+}
+
+.ticker-outer:hover .ticker-track {
+    animation-play-state: paused;
+}
+
+@keyframes ticker-scroll {
+    from {
+        transform: translateX(0);
+    }
+
+    to {
+        transform: translateX(-50%);
+    }
 }
 
 .ticker-track .tick-item {
@@ -604,8 +623,13 @@ thead th {
     color: var(--dim);
     font-weight: 500;
     border-bottom: 1px solid var(--border);
+    border-right: 1px solid var(--border-soft);
     white-space: nowrap;
     min-width: 74px;
+}
+
+thead th:last-child {
+    border-right: none;
 }
 
 thead th.row-head {
@@ -614,7 +638,9 @@ thead th.row-head {
     left: 0;
     z-index: 6;
     background: var(--panel-2);
-    min-width: 220px;
+    width: 1%;
+    min-width: 0;
+    white-space: nowrap;
 }
 
 thead th .wk {
@@ -634,10 +660,15 @@ thead th .dt {
 tbody td {
     padding: 10px 14px;
     text-align: right;
-    border-bottom: 1px solid var(--border-soft);
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid var(--border-soft);
     color: var(--cyan);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+}
+
+tbody td:last-child {
+    border-right: none;
 }
 
 tbody td.empty {
@@ -650,8 +681,10 @@ tbody td.row-head {
     left: 0;
     background: var(--panel);
     color: var(--text);
-    border-right: 1px solid var(--border-soft);
+    border-right: 1px solid var(--border);
     vertical-align: middle;
+    width: 1%;
+    white-space: nowrap;
 }
 
 tbody tr:hover td {
@@ -775,10 +808,23 @@ tbody tr:hover td.row-head {
 }
 
 /* ---------------- products tab ---------------- */
+.section-label {
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    color: var(--dim);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    font-weight: 700;
+}
+
+.section-label-spaced {
+    margin-top: 26px;
+}
+
 .prod-tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 10px;
 }
 
 .prod-tag {
@@ -786,34 +832,51 @@ tbody tr:hover td.row-head {
     align-items: center;
     gap: 8px;
     background: var(--panel-2);
-    border: 1px solid var(--border);
-    padding: 8px 10px 8px 12px;
+    border: 1px solid var(--tag-color, var(--border));
+    color: var(--tag-color, var(--text));
+    padding: 9px 10px 9px 14px;
     border-radius: 20px;
-    font-size: 12.5px;
+    font-size: 13px;
+    font-weight: 700;
 }
 
 .prod-tag-del {
     background: none;
     border: none;
-    color: var(--dim);
+    color: inherit;
+    opacity: 0.55;
     cursor: pointer;
     font-size: 14px;
     line-height: 1;
-    padding: 2px 4px;
+    padding: 2px 6px;
 }
 
 .prod-tag-del:hover {
+    opacity: 1;
     color: var(--red);
 }
 
 .add-product-row {
     display: flex;
     gap: 10px;
-    margin-top: 18px;
 }
 
-.text-input {
-    width: 90px;
+.emoji-input {
+    width: 48px;
+    height: 48px;
+    flex: 0 0 auto;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    text-align: center;
+    font-size: 19px;
+    color: var(--text);
+}
+
+.emoji-input:focus,
+.text-input:focus {
+    outline: none;
+    border-color: var(--cyan);
 }
 
 .text-input.grow {
@@ -824,22 +887,26 @@ tbody tr:hover td.row-head {
 .preset-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 10px;
 }
 
 .preset-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
     background: var(--panel-2);
-    border: 1px dashed var(--border);
-    padding: 8px 14px;
+    border: 1px solid var(--border);
+    padding: 9px 14px;
     border-radius: 20px;
-    font-size: 12.5px;
+    font-size: 13px;
+    font-weight: 600;
     cursor: pointer;
-    color: var(--dim);
+    color: var(--text);
 }
 
 .preset-chip:hover {
     border-color: var(--cyan);
-    color: var(--text);
+    color: var(--cyan-2);
 }
 
 /* ---------------- variation tab ---------------- */
@@ -948,10 +1015,14 @@ thead th.date-col {
 
 thead th.retailer-col {
     text-align: left;
+    width: 1%;
+    white-space: nowrap;
 }
 
 tbody td.retailer-cell {
     text-align: left;
+    width: 1%;
+    white-space: nowrap;
 }
 
 tbody td.price-cell {
@@ -960,10 +1031,20 @@ tbody td.price-cell {
 
 .price-country {
     display: block;
+    text-align: center;
     color: var(--dim);
     font-size: 10px;
+    font-weight: 500;
     letter-spacing: 0.03em;
     margin-top: 3px;
+    white-space: nowrap;
+    cursor: default;
+}
+
+.origin-code {
+    color: var(--cyan);
+    font-weight: 800;
+    letter-spacing: 0.04em;
 }
 
 /* ---------------- detail table: clickable "verify on retailer site" price ---------------- */

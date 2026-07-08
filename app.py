@@ -37,6 +37,17 @@ def _price_to_float(text):
     return float(m.group(1)) if m else None
 
 
+def _find_col(header, *candidates):
+    """Case/spacing-tolerant column lookup - returns the index of the first
+    header cell matching any candidate name, or None if none match."""
+    normalized = [str(h).strip().lower() if h else "" for h in header]
+    for candidate in candidates:
+        target = candidate.strip().lower()
+        if target in normalized:
+            return normalized.index(target)
+    return None
+
+
 def _resolve_retailers(retailer_param):
     if not retailer_param or retailer_param == "all":
         return RETAILERS
@@ -279,6 +290,14 @@ def api_history():
         # old-format workbook without Product ID/Label columns
         return jsonify(empty)
 
+    # Origin column name isn't guaranteed, so try a few likely variants.
+    # If none of these match your actual header, check products.xlsx and
+    # add the exact text here.
+    origin_idx = _find_col(
+        header,
+        "Country Of Origin", "Country of Origin", "Origin", "Country",
+    )
+
     # cell[key=(product_id, retailer)][date_iso] = latest price that day
     cells = {}
     date_set = set()
@@ -293,6 +312,7 @@ def api_history():
         retailer = values[idx["Supermarket"]]
         price_text = values[idx["Per Kg Price"]]
         timestamp = values[idx["Timestamp"]]
+        origin = values[origin_idx] if origin_idx is not None and len(values) > origin_idx else None
 
         if not product_id or not retailer or not timestamp:
             continue
@@ -310,9 +330,11 @@ def api_history():
         date_set.add(date_iso)
 
         key = (product_id, retailer)
-        cells.setdefault(key, {"product_label": product_label, "prices": {}})
+        cells.setdefault(key, {"product_label": product_label, "prices": {}, "origins": {}})
         # later rows overwrite earlier ones for the same day -> "latest wins"
         cells[key]["prices"][date_iso] = price
+        if origin:
+            cells[key]["origins"][date_iso] = str(origin).strip()
 
     wb.close()
 
@@ -328,6 +350,7 @@ def api_history():
             "retailer": retailer,
             "retailer_label": RETAILER_LABELS.get(retailer, retailer.capitalize()),
             "prices": info["prices"],
+            "origins": info["origins"],
         })
 
     distinct_products = {r["product_id"] for r in rows}

@@ -10,10 +10,10 @@ PRODUCTS = [
         "emoji": "🧄",
         "keywords": {
             "barakat": "Garlic",
-            "kibsons": "Garlic",
+            "kibsons": "garlic",
             "unioncoop": "Garlic",
             "carrefour": "Garlic",
-            "lulu": "Garlic",
+            "lulu": "Ginger Garlic",
         },
     },
     {
@@ -24,7 +24,7 @@ PRODUCTS = [
             "barakat": "Cucumber",
             "kibsons": "Cucumber",
             "unioncoop": "cucumber",
-            "carrefour": "Cucumber",
+            "carrefour": "cucumber",
             "lulu": "Cucumber",
         },
     },
