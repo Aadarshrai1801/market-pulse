@@ -3,7 +3,7 @@ import {
   createRetailerPill, getProductMeta, normalizeRetailerId, normalizeProductId,
 } from './utils.js';
 import {
-  loadMeta, createJob, pollJob, loadHistory as loadHistoryApi, mapHistoryResponse, mapScrapeResult,
+  loadMeta, createJob, pollJob, loadHistory as loadHistoryApi, mapHistoryResponse, mapScrapeResult, ocrScan,
 } from './api.js';
 import { renderProductTags, renderProductSelect, renderPresets, addProduct, resetProducts, removeProduct } from './products.js';
 import { renderVariationCharts } from './charts.js';
@@ -617,6 +617,263 @@ function buildVariationTable(dates, retailers, products, lookup) {
   };
 }
 
+/* ============================== IMPORT IMAGES / OCR TAB ============================== */
+
+let ocrSelectedFile = null;
+let ocrResults = [];
+
+function handleOcrFile(file) {
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    setStatus('Please choose an image file (JPG, PNG, JPEG, WEBP).', 'err');
+    return;
+  }
+
+  ocrSelectedFile = file;
+
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    const img = document.getElementById('previewImage');
+    const card = document.getElementById('previewCard');
+    if (img) img.src = event.target.result;
+    if (card) card.style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+
+  const status = document.getElementById('ocrStatus');
+  if (status) status.textContent = `Selected: ${file.name}. Click "Scan Image" to run OCR.`;
+}
+
+function renderOcrResults(items) {
+  const body = document.getElementById('ocrBody');
+  if (!body) return;
+
+  if (!items.length) {
+    body.innerHTML = '<tr><td colspan="8"><div class="empty-state">📸<br><br>No text/prices detected in this image.</div></td></tr>';
+    return;
+  }
+
+  body.innerHTML = items.map((item, index) => `
+    <tr>
+      <td>${index + 1}</td>
+      <td><b>${escapeHtml(item.country)}</b></td>
+      <td><span class="rpill">${escapeHtml(item.shipment)}</span></td>
+      <td><div class="prod-name">${escapeHtml(item.product)}</div></td>
+      <td>${escapeHtml(item.weight)}</td>
+      <td>${escapeHtml(item.packing)}</td>
+      <td>
+        <div class="price-box">
+          <span class="price-num">${item.price > 0 ? item.price.toFixed(2) : 'NA'}</span>
+        </div>
+      </td>
+      <td>${item.price > 0 ? '<span style="color:var(--green)">✓ Valid</span>' : '<span style="color:var(--orange)">⚠ NA / Unpriced</span>'}</td>
+    </tr>
+  `).join('');
+}
+
+function updateOcrStats(items, overallConfidence, imageCount) {
+  const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+  setText('ocrImages', imageCount);
+  setText('ocrProducts', items.length);
+  setText('ocrPrices', items.filter((item) => item.price).length);
+  setText('ocrConfidence', `${Math.round(overallConfidence || 0)}%`);
+}
+
+function ocrResultsToCsv() {
+  if (!ocrResults.length) return '';
+  // Expanded header array matching your sheet's columns
+  const headers = ['#', 'Country', 'Shipment', 'Product', 'Weight', 'Packing', 'Price (AED)', 'Confidence %'];
+  const rows = ocrResults.map((item, index) => [
+    index + 1,
+    item.country,
+    item.shipment,
+    item.product,
+    item.weight,
+    item.packing,
+    item.price ? item.price.toFixed(2) : 'NA',
+    Math.round(item.confidence),
+  ]);
+  return toCsv(headers, rows);
+}
+
+function clearOcr() {
+  ocrSelectedFile = null;
+  ocrResults = [];
+
+  const input = document.getElementById('ocrImage');
+  if (input) input.value = '';
+
+  const card = document.getElementById('previewCard');
+  if (card) card.style.display = 'none';
+  const img = document.getElementById('previewImage');
+  if (img) img.src = '';
+
+  const status = document.getElementById('ocrStatus');
+  if (status) status.textContent = 'Ready. Select an image to begin OCR.';
+
+  renderOcrResults([]);
+  updateOcrStats([], 0, 0);
+}
+
+function bindOCR() {
+  const uploadBox = document.getElementById('uploadBox');
+  const fileInput = document.getElementById('ocrImage');
+  const btnOCR = document.getElementById('btnOCR');
+  const btnClearOCR = document.getElementById('btnClearOCR');
+
+  if (!uploadBox || !fileInput || !btnOCR) return;
+
+  // Track scanning state to avoid async race conditions
+  let isScanning = false;
+  let currentScanId = 0;
+
+  // File picked via "Browse Files"
+  fileInput.addEventListener('change', (event) => {
+    if (event.target.files?.[0]) {
+      handleOcrFile(event.target.files[0]);
+    }
+  });
+
+  // Drag & drop handlers
+  uploadBox.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    uploadBox.classList.add('drag-over');
+  });
+
+  uploadBox.addEventListener('dragleave', () => {
+    uploadBox.classList.remove('drag-over');
+  });
+
+  uploadBox.addEventListener('drop', (event) => {
+    event.preventDefault();
+    uploadBox.classList.remove('drag-over');
+    
+    // Prevent dropping files if a scan is already running
+    if (isScanning) {
+      setStatus('Please wait until the current scan completes.', 'err');
+      return;
+    }
+
+    const file = event.dataTransfer.files?.[0];
+    if (file) {
+      fileInput.files = event.dataTransfer.files; // Sync file input state
+      handleOcrFile(file);
+    }
+  });
+
+  // Run OCR Engine Pipeline
+  btnOCR.addEventListener('click', async () => {
+    if (!ocrSelectedFile) {
+      setStatus('Select an image first.', 'err');
+      return;
+    }
+    
+    if (isScanning) return; // Guard duplicate execution clicks
+
+    const status = document.getElementById('ocrStatus');
+    
+    // Initialize loading states
+    isScanning = true;
+    btnOCR.disabled = true;
+    if (btnClearOCR) btnClearOCR.disabled = true;
+    
+    // Increment scan identifier token to track async execution context
+    const thisScanId = ++currentScanId;
+    
+    if (status) {
+      status.className = 'status-line';
+      status.textContent = 'Processing matrix filters & scanning document…';
+    }
+
+    try {
+      const data = await ocrScan(ocrSelectedFile);
+
+      // Guard: Check if user changed the view/cleared data while waiting for response
+      if (thisScanId !== currentScanId) return;
+
+      if (!data || data.ok === false) {
+        throw new Error(data?.error || 'OCR core processing layer failure.');
+      }
+
+      const rawProducts = data.products || [];
+      
+      // === REPLACE THE OLD MAP BLOCK WITH THIS UPDATED ONE ===
+      ocrResults = rawProducts.map((item) => ({
+        country: item.country || '—',
+        shipment: item.shipment || '—',
+        product: item.product || '—',
+        weight: item.weight || '—',
+        packing: item.packing || '—',
+        price: parseFloat(item.price) || 0,
+        confidence: Math.min(100, Math.max(0, (Number(item.confidence) || 0) * 100)), // Clamp percentages between 0-100
+      }));
+      // =======================================================
+
+      const overallConfidence = ocrResults.length
+        ? ocrResults.reduce((sum, item) => sum + item.confidence, 0) / ocrResults.length
+        : 0;
+
+      // Update structural presentation layers
+      renderOcrResults(ocrResults);
+      updateOcrStats(ocrResults, overallConfidence, 1);
+      
+      if (status) {
+        status.className = 'status-line ok';
+        status.textContent = ocrResults.length
+          ? `✓ Extraction complete: Found ${ocrResults.length} item(s).`
+          : '⚠ Matrix structural analysis complete, but no valid price blocks were found.';
+      }
+    } catch (error) {
+      // Guard against old async calls overwriting current error state
+      if (thisScanId !== currentScanId) return;
+
+      console.error('[MarketPulse] OCR Module Integration Failure:', error);
+      if (status) {
+        status.className = 'status-line error';
+        status.textContent = `✗ ${error.message}`;
+      }
+      setStatus(`✗ OCR failed: ${error.message}`, 'err');
+    } finally {
+      // Release engine locks safely if this context is still relevant
+      if (thisScanId === currentScanId) {
+        isScanning = false;
+        btnOCR.disabled = false;
+        if (btnClearOCR) btnClearOCR.disabled = false;
+      }
+    }
+  });
+
+  // Safe wrapper execution for cleaner implementation
+  btnClearOCR?.addEventListener('click', () => {
+    currentScanId++; // Invalidate running async promises on reset
+    isScanning = false;
+    btnOCR.disabled = false;
+    if (btnClearOCR) btnClearOCR.disabled = false;
+    clearOcr();
+  });
+
+  // Data Export Pipelines
+  document.getElementById('ocrCsvBtn')?.addEventListener('click', () => {
+    if (!ocrResults || !ocrResults.length) { 
+      setStatus('No data available to export yet.', 'err'); 
+      return; 
+    }
+    downloadCsv('marketpulse-ocr-results.csv', ocrResultsToCsv());
+    setStatus('✓ CSV export saved successfully', 'ok');
+  });
+
+  document.getElementById('ocrCopyBtn')?.addEventListener('click', () => {
+    const csv = ocrResultsToCsv();
+    if (!csv) { 
+      setStatus('No tabular text compiled to copy.', 'err'); 
+      return; 
+    }
+    navigator.clipboard.writeText(csv)
+      .then(() => setStatus('✓ Structured schema copied to clipboard', 'ok'))
+      .catch((err) => console.error('Clipboard write permission denied:', err));
+  });
+}
+
 /* ============================== INIT ============================== */
 
 async function init() {
@@ -625,6 +882,7 @@ async function init() {
   bindTabs();
   bindProductsTab();
   wireCsvCopyButtons();
+  bindOCR()
 
   refreshProductDependents();
 

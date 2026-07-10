@@ -194,16 +194,185 @@
 
     <!-- ===================== IMPORT IMAGES ===================== -->
     <section class="tab-panel" id="tab-images">
+    
+      <!-- OCR Upload -->
       <div class="panel">
-        <div class="panel-title">Import Images</div>
-        <div class="panel-sub" style="margin-top:6px;">
-          Not wired up yet — this used to run through the Anthropic API for OCR-style price extraction from
-          screenshots. Since prices now come straight from your Python scraper, you likely don't need this tab
-          unless you want to bulk-import prices from receipt/shelf photos. Let me know if you want it built against
-          your backend.
+    
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">📸 OCR Price Extraction</div>
+            <div class="panel-sub">
+              Upload supermarket shelf labels or receipts to automatically extract product names and prices.
+            </div>
+          </div>
+    
+          <div class="panel-actions">
+            <span class="live-pill">
+              <span class="live-dot"></span>
+              OCR Ready
+            </span>
+          </div>
         </div>
+    
+        <!-- Statistics -->
+        <section class="stats-grid" style="margin-top:20px;">
+    
+          <div class="stat-card">
+            <div class="stat-icon">🖼</div>
+            <div class="stat-num" id="ocrImages">0</div>
+            <div class="stat-label">Images</div>
+          </div>
+    
+          <div class="stat-card">
+            <div class="stat-icon">📦</div>
+            <div class="stat-num" id="ocrProducts">0</div>
+            <div class="stat-label">Products</div>
+          </div>
+    
+          <div class="stat-card">
+            <div class="stat-icon">💰</div>
+            <div class="stat-num" id="ocrPrices">0</div>
+            <div class="stat-label">Prices</div>
+          </div>
+    
+          <div class="stat-card">
+            <div class="stat-icon">🎯</div>
+            <div class="stat-num" id="ocrConfidence">0%</div>
+            <div class="stat-label">Confidence</div>
+          </div>
+    
+        </section>
+    
+        <!-- Upload Area -->
+    
+        <div class="ocr-upload-area" id="uploadBox">
+    
+          <input type="file" id="ocrImage" accept="image/*" hidden>
+    
+          <div class="ocr-upload-content">
+    
+            <div class="ocr-upload-icon">
+              📸
+            </div>
+    
+            <div class="ocr-upload-title">
+              Drag & Drop Image Here
+            </div>
+    
+            <div class="ocr-upload-sub">
+              JPG • PNG • JPEG • WEBP
+            </div>
+    
+            <button type="button" class="ghost-btn" onclick="document.getElementById('ocrImage').click()">
+    
+              Browse Files
+    
+            </button>
+    
+          </div>
+    
+        </div>
+    
+        <!-- Selected Image -->
+    
+        <div id="previewCard" style="display:none;margin-top:25px;">
+    
+          <div class="panel">
+    
+            <div class="panel-title">
+              Image Preview
+            </div>
+    
+            <img id="previewImage" style="
+                            width:100%;
+                            max-height:450px;
+                            object-fit:contain;
+                            margin-top:15px;
+                            border-radius:12px;
+                            border:1px solid rgba(255,255,255,.08);
+                        ">
+    
+          </div>
+    
+        </div>
+    
+        <!-- Buttons -->
+    
+        <div style="
+                display:flex;
+                gap:15px;
+                margin-top:25px;
+                align-items:center;
+                ">
+    
+          <button class="fetch-btn" id="btnOCR">
+    
+            🔍 Scan Image
+    
+          </button>
+    
+          <button class="ghost-btn" id="btnClearOCR">
+    
+            🗑 Clear
+    
+          </button>
+    
+        </div>
+    
+        <!-- Progress -->
+    
+        <div class="status-line" id="ocrStatus" style="margin-top:18px;">
+    
+          Ready. Select an image to begin OCR.
+    
+        </div>
+    
       </div>
-    </section>
+    
+      <!-- OCR Results -->
+    
+      <div class="panel" style="margin-top:30px;">
+      
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">OCR Results</div>
+            <div class="panel-sub">Extracted fields matching scanned sheet layout</div>
+          </div>
+      
+          <div class="panel-actions">
+            <button class="ghost-btn" id="ocrCopyBtn">⎘ Copy</button>
+            <button class="ghost-btn" id="ocrCsvBtn">↓ CSV</button>
+          </div>
+        </div>
+      
+        <div class="table-scroll">
+          <table id="ocrTable">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Country</th>
+                <th>Shipment</th>
+                <th>Product</th>
+                <th>Weight</th>
+                <th>Packing</th>
+                <th>Price (AED)</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="ocrBody">
+              <tr>
+                <td colspan="8">
+                  <div class="empty-state">
+                    📸<br><br>
+                    Upload an image to begin OCR.
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      
+      </div>
 
     <!-- ===================== PRICE VARIATION ===================== -->
     <section class="tab-panel" id="tab-variation">

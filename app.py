@@ -3,7 +3,12 @@ import re
 import threading
 import uuid
 from datetime import datetime
+import werkzeug
+from flask import Flask, request, jsonify
+import cv2
+import numpy as np
 
+from ocr.ocr import preprocess_image, run_ocr, extract_table, extract_text, group_rows, detect_header_columns
 from flask import Flask, request, jsonify, render_template
 from openpyxl import load_workbook
 
@@ -16,6 +21,10 @@ from scraper import (
 from products_config import PRODUCTS, PRODUCTS_BY_ID, RETAILER_LABELS, get_search_keyword
 
 app = Flask(__name__)
+
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 RETAILERS = list(SITE_SEARCH_CONFIG.keys())
 EXCEL_PATH = "products.xlsx"
@@ -365,6 +374,86 @@ def api_history():
             "retailers": len(distinct_retailers),
         },
     })
+    
+
+    
+@app.route('/api/ocr', methods=['POST'])
+def api_ocr_scan():
+    """
+    Bridge API endpoint accepting multipart image forms from api.js 
+    and returning structured token maps matching the frontend expectations.
+    """
+    if 'image' not in request.files:
+        return jsonify({"ok": False, "error": "No image file part found in request form parameters."}), 400
+        
+    file = request.files['image']
+    if file.filename == '':
+        return jsonify({"ok": False, "error": "No file selected for transmission."}), 400
+
+    try:
+        # 1. Read image safely without writing directly to disk
+        in_memory_stream = file.read()
+        nparr = np.frombuffer(in_memory_stream, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if img is None:
+            return jsonify({"ok": False, "error": "Invalid image file format or corrupted payload."}), 400
+
+        # 2. Temporary storage setup because preprocess_image expects a path string
+        # (Alternatively, you can modify preprocess_image to accept the image matrix directly)
+        temp_path = "temp_upload_ocr.png"
+        cv2.imwrite(temp_path, img)
+
+        # 3. Fire the custom PP-OCRv5 pipeline steps
+        processed_matrix = preprocess_image(temp_path)
+        ocr_tokens = run_ocr(processed_matrix, confidence_threshold=0.60)
+
+        # --- DEBUG: temporary diagnostics, remove once the pipeline is confirmed working ---
+        print("=" * 60)
+        print(f"[OCR DEBUG] Raw tokens detected: {len(ocr_tokens)}")
+        print("[OCR DEBUG] Raw extracted text:")
+        print(extract_text(ocr_tokens))
+        rows = group_rows(ocr_tokens)
+        print(f"[OCR DEBUG] Rows grouped: {len(rows)}")
+        columns = detect_header_columns(rows)
+        print(f"[OCR DEBUG] Header columns detected ({len(columns)}/6): {list(columns.keys())}")
+        structured_rows = extract_table(ocr_tokens)
+        print(f"[OCR DEBUG] Structured rows returned by extract_table: {len(structured_rows)}")
+        print("=" * 60)
+        # --- END DEBUG ---
+
+        # 4. Cleanup temp disk usage
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+        # 5. Map fields seamlessly into Javascript's expected schema
+        # frontend looks for: country, shipment, product, weight, packing, price, confidence
+        payload_products = []
+        for item in structured_rows:
+            # Reconstruct an aggregate token confidence safely, or fallback to 1.0
+            avg_conf = 0.85
+
+            payload_products.append({
+                "country": item.get("country") or "",
+                "shipment": item.get("shipment") or "",
+                "product": item.get("product") or "Unknown Product",
+                "weight": item.get("weight") or "",
+                "packing": item.get("packing") or "",
+                "price": item.get("price") or "0.00",
+                "confidence": avg_conf
+            })
+
+        return jsonify({
+            "ok": True,
+            "count": len(payload_products),
+            "products": payload_products
+        })
+
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "error": f"Internal Core Module Failure: {str(e)}"
+        }), 500
 
 
 if __name__ == "__main__":

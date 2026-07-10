@@ -1079,3 +1079,78 @@ tbody td.price-cell {
     vertical-align: middle;
     transition: opacity 0.15s ease;
 }
+
+.ocr-upload-area {
+    margin-top: 25px;
+    border: 2px dashed rgba(80, 180, 255, .35);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, .02);
+    transition: .3s;
+    cursor: pointer;
+}
+
+.ocr-upload-area:hover {
+    border-color: #4ea3ff;
+    background: rgba(78, 163, 255, .06);
+}
+
+.ocr-upload-content {
+    padding: 55px 20px;
+    text-align: center;
+}
+
+.ocr-upload-icon {
+    font-size: 64px;
+    margin-bottom: 15px;
+}
+
+.ocr-upload-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: white;
+}
+
+.ocr-upload-sub {
+    color: #9aa7b5;
+    margin: 12px 0 20px;
+}
+
+/* ==========================================================================
+   UPDATED OCR RESULTS TABLE LAYOUT (Maintains color palette consistency)
+   ========================================================================== */
+
+#ocrTable th {
+    text-align: left;
+    background: var(--panel-2);
+    color: var(--dim);
+    font-weight: 500;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+#ocrTable td {
+    padding: 12px 14px;
+    vertical-align: middle;
+    text-align: left;
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--text);
+    white-space: nowrap;
+}
+
+/* Align text and set layout weights for columns */
+#ocrTable th:nth-child(7),
+#ocrTable td:nth-child(7) {
+    text-align: center;
+    /* Center-align the Price column */
+}
+
+#ocrTable tbody tr:hover {
+    background: rgba(78, 163, 255, .08);
+}
+
+/* Ensure the table fills the horizontal area if columns expand */
+#ocrTable {
+    width: 100%;
+    border-collapse: collapse;
+}

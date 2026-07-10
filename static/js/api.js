@@ -93,6 +93,23 @@ export function mapScrapeResult(item) {
   };
 }
 
+export async function ocrScan(file) {
+  const formData = new FormData();
+  formData.append('image', file);
+
+  const response = await fetch(`${API_BASE}/api/ocr`, {
+    method: 'POST',
+    body: formData, // no Content-Type header — the browser sets the multipart boundary itself
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || 'OCR request failed.');
+  }
+
+  return response.json(); // expected: { items: [{ product, price, confidence }], confidence }
+}
+
 export function mapHistoryResponse(data) {
   return {
     dates: data.dates || [],
