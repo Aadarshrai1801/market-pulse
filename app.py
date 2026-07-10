@@ -2,7 +2,7 @@ import os
 import re
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 import werkzeug
 from flask import Flask, request, jsonify
 import cv2
@@ -19,8 +19,37 @@ from scraper import (
     save_to_excel,
 )
 from products_config import PRODUCTS, PRODUCTS_BY_ID, RETAILER_LABELS, get_search_keyword
+from auth import auth_bp, init_auth, login_required, role_required
 
 app = Flask(__name__)
+
+
+def _load_or_create_secret_key(path="secret.key"):
+    """
+    Flask needs a stable secret_key to sign session cookies - if it changes
+    on every restart, everyone gets logged out each time the server
+    restarts. SECRET_KEY env var wins if set (recommended for production);
+    otherwise a random key is generated once and cached in `path` so it
+    survives restarts on this machine.
+    """
+    env_key = os.environ.get("SECRET_KEY")
+    if env_key:
+        return env_key
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            return f.read().strip()
+    key = os.urandom(32).hex()
+    with open(path, "w") as f:
+        f.write(key)
+    return key
+
+
+app.secret_key = _load_or_create_secret_key()
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+
+init_auth(app)          # creates users.db + seeds a default admin if empty
+app.register_blueprint(auth_bp)
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -44,6 +73,56 @@ def _price_to_float(text):
         return None
     m = re.search(r"(\d+(?:\.\d+)?)", text)
     return float(m.group(1)) if m else None
+
+def get_previous_price(product_id, retailer, current_price):
+    """
+    Returns the previous saved price for the same product and retailer,
+    ignoring the current price if it is already the newest entry.
+    """
+    if not os.path.exists(EXCEL_PATH):
+        return None
+
+    wb = load_workbook(EXCEL_PATH, read_only=True)
+    ws = wb.active
+
+    rows = list(ws.iter_rows(values_only=True)) #type: ignore
+
+    if len(rows) < 2:
+        wb.close()
+        return None
+
+    header = rows[0]
+
+    pid_idx = header.index("Product ID")
+    retailer_idx = header.index("Supermarket")
+    price_idx = header.index("Per Kg Price")
+    time_idx = header.index("Timestamp")
+
+    history = []
+
+    for row in rows[1:]:
+        if row[pid_idx] != product_id:
+            continue
+        if str(row[retailer_idx]).lower() != retailer.lower():
+            continue
+
+        price = _price_to_float(row[price_idx])
+        if price is None:
+            continue
+
+        history.append({
+            "price": price,
+            "timestamp": row[time_idx]
+        })
+
+    wb.close()
+
+    history.sort(key=lambda x: str(x["timestamp"]))
+
+    if len(history) < 2:
+        return None
+
+    return history[-2]["price"]
 
 
 def _find_col(header, *candidates):
@@ -80,6 +159,26 @@ def _scrape_one(product, retailer):
     try:
         url = find_product_url(retailer, keyword)
         data = get_product_details(url, retailer)
+        
+        current_price = _price_to_float(data.get("price"))
+
+        previous_price = get_previous_price(
+            product["id"],
+            retailer,
+            current_price
+        )
+
+        data["previous_price"] = previous_price
+
+        if previous_price is None:
+            data["price_change"] = "same"
+        elif current_price > previous_price:
+            data["price_change"] = "up"
+        elif current_price < previous_price:
+            data["price_change"] = "down"
+        else:
+            data["price_change"] = "same"
+                
         data["ok"] = True
         data["product_id"] = product["id"]
         data["product_label"] = product["name"]
@@ -109,6 +208,7 @@ def _scrape_one(product, retailer):
 # ------------------------------------------------------------------
 
 @app.route("/")
+@login_required
 def index():
     return render_template("index.html")
 
@@ -118,6 +218,7 @@ def index():
 # ------------------------------------------------------------------
 
 @app.route("/api/meta")
+@login_required
 def api_meta():
     return jsonify({
         "retailers": [
@@ -136,6 +237,7 @@ def api_meta():
 # ------------------------------------------------------------------
 
 @app.route("/api/fetch", methods=["POST"])
+@role_required("editor", "admin")
 def api_fetch():
     """
     Synchronous fetch - fine for a single retailer/product (a few seconds),
@@ -193,6 +295,7 @@ def _run_fetch_job(job_id, retailers, products):
 
 
 @app.route("/api/jobs", methods=["POST"])
+@role_required("editor", "admin")
 def api_create_job():
     """
     Kick off a fetch in the background and return immediately.
@@ -240,6 +343,7 @@ def api_create_job():
 
 
 @app.route("/api/jobs/<job_id>")
+@login_required
 def api_get_job(job_id):
     """Poll this for progress/results: {status: 'running'|'done', completed, total, results}."""
     with JOBS_LOCK:
@@ -255,6 +359,7 @@ def api_get_job(job_id):
 
 
 @app.route("/api/jobs")
+@login_required
 def api_list_jobs():
     """Recent jobs, newest first (without their full result payloads)."""
     with JOBS_LOCK:
@@ -272,6 +377,7 @@ def api_list_jobs():
 # ------------------------------------------------------------------
 
 @app.route("/api/history")
+@login_required
 def api_history():
     retailer_param = (request.args.get("retailer") or "all").strip().lower()
     product_param = (request.args.get("product") or "all").strip().lower()
@@ -378,6 +484,7 @@ def api_history():
 
     
 @app.route('/api/ocr', methods=['POST'])
+@role_required("editor", "admin")
 def api_ocr_scan():
     """
     Bridge API endpoint accepting multipart image forms from api.js 

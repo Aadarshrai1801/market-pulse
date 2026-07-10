@@ -28,6 +28,11 @@
       <button class="btn-sync" id="syncBtn" type="button"><span class="spin-ico">⟳</span> Sync</button>
       <span class="live-pill"><span class="live-dot"></span>LIVE</span>
       <span class="date-pill" id="dateChip">—</span>
+      <span class="user-badge" id="userBadge" style="display:none;">
+        <span id="userBadgeName">—</span>
+        <span class="role-chip" id="userBadgeRole">—</span>
+      </span>
+      <button class="logout-btn" id="logoutBtn" type="button" style="display:none;">Sign out</button>
     </div>
   </header>
 
@@ -39,6 +44,7 @@
       <button class="tab-btn" data-tab="images">⌨ IMPORT IMAGES</button>
       <button class="tab-btn" data-tab="variation">☑ PRICE VARIATION</button>
       <button class="tab-btn" data-tab="scheduler">⏰ SCHEDULER</button>
+      <button class="tab-btn" data-tab="admin" id="adminTabBtn" style="display:none;">🛡 ADMIN</button>
     </nav>
 
     <!-- ===================== FETCH & ANALYSE ===================== -->
@@ -194,10 +200,10 @@
 
     <!-- ===================== IMPORT IMAGES ===================== -->
     <section class="tab-panel" id="tab-images">
-    
+
       <!-- OCR Upload -->
       <div class="panel">
-    
+
         <div class="panel-head">
           <div>
             <div class="panel-title">📸 OCR Price Extraction</div>
@@ -205,7 +211,7 @@
               Upload supermarket shelf labels or receipts to automatically extract product names and prices.
             </div>
           </div>
-    
+
           <div class="panel-actions">
             <span class="live-pill">
               <span class="live-dot"></span>
@@ -213,76 +219,76 @@
             </span>
           </div>
         </div>
-    
+
         <!-- Statistics -->
         <section class="stats-grid" style="margin-top:20px;">
-    
+
           <div class="stat-card">
             <div class="stat-icon">🖼</div>
             <div class="stat-num" id="ocrImages">0</div>
             <div class="stat-label">Images</div>
           </div>
-    
+
           <div class="stat-card">
             <div class="stat-icon">📦</div>
             <div class="stat-num" id="ocrProducts">0</div>
             <div class="stat-label">Products</div>
           </div>
-    
+
           <div class="stat-card">
             <div class="stat-icon">💰</div>
             <div class="stat-num" id="ocrPrices">0</div>
             <div class="stat-label">Prices</div>
           </div>
-    
+
           <div class="stat-card">
             <div class="stat-icon">🎯</div>
             <div class="stat-num" id="ocrConfidence">0%</div>
             <div class="stat-label">Confidence</div>
           </div>
-    
+
         </section>
-    
+
         <!-- Upload Area -->
-    
+
         <div class="ocr-upload-area" id="uploadBox">
-    
+
           <input type="file" id="ocrImage" accept="image/*" hidden>
-    
+
           <div class="ocr-upload-content">
-    
+
             <div class="ocr-upload-icon">
               📸
             </div>
-    
+
             <div class="ocr-upload-title">
               Drag & Drop Image Here
             </div>
-    
+
             <div class="ocr-upload-sub">
               JPG • PNG • JPEG • WEBP
             </div>
-    
+
             <button type="button" class="ghost-btn" onclick="document.getElementById('ocrImage').click()">
-    
+
               Browse Files
-    
+
             </button>
-    
+
           </div>
-    
+
         </div>
-    
+
         <!-- Selected Image -->
-    
+
         <div id="previewCard" style="display:none;margin-top:25px;">
-    
+
           <div class="panel">
-    
+
             <div class="panel-title">
               Image Preview
             </div>
-    
+
             <img id="previewImage" style="
                             width:100%;
                             max-height:450px;
@@ -291,60 +297,60 @@
                             border-radius:12px;
                             border:1px solid rgba(255,255,255,.08);
                         ">
-    
+
           </div>
-    
+
         </div>
-    
+
         <!-- Buttons -->
-    
+
         <div style="
                 display:flex;
                 gap:15px;
                 margin-top:25px;
                 align-items:center;
                 ">
-    
+
           <button class="fetch-btn" id="btnOCR">
-    
+
             🔍 Scan Image
-    
+
           </button>
-    
+
           <button class="ghost-btn" id="btnClearOCR">
-    
+
             🗑 Clear
-    
+
           </button>
-    
+
         </div>
-    
+
         <!-- Progress -->
-    
+
         <div class="status-line" id="ocrStatus" style="margin-top:18px;">
-    
+
           Ready. Select an image to begin OCR.
-    
+
         </div>
-    
+
       </div>
-    
+
       <!-- OCR Results -->
-    
+
       <div class="panel" style="margin-top:30px;">
-      
+
         <div class="panel-head">
           <div>
             <div class="panel-title">OCR Results</div>
             <div class="panel-sub">Extracted fields matching scanned sheet layout</div>
           </div>
-      
+
           <div class="panel-actions">
             <button class="ghost-btn" id="ocrCopyBtn">⎘ Copy</button>
             <button class="ghost-btn" id="ocrCsvBtn">↓ CSV</button>
           </div>
         </div>
-      
+
         <div class="table-scroll">
           <table id="ocrTable">
             <thead>
@@ -371,77 +377,133 @@
             </tbody>
           </table>
         </div>
-      
+
       </div>
 
-    <!-- ===================== PRICE VARIATION ===================== -->
-    <section class="tab-panel" id="tab-variation">
-      <div class="panel">
-        <div class="panel-head">
-          <div>
-            <div class="panel-title">Price Variation</div>
-            <div class="panel-sub" id="varSub">Last 30 days</div>
+      <!-- ===================== PRICE VARIATION ===================== -->
+      <section class="tab-panel" id="tab-variation">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="panel-title">Price Variation</div>
+              <div class="panel-sub" id="varSub">Last 30 days</div>
+            </div>
+            <div class="panel-actions">
+              <button class="ghost-btn" id="btnExportVariation" type="button">↓ CSV</button>
+            </div>
           </div>
-          <div class="panel-actions">
-            <button class="ghost-btn" id="btnExportVariation" type="button">↓ CSV</button>
+
+          <div class="controls controls-3">
+            <div class="field">
+              <div class="field-label">Retailer</div>
+              <select class="select-input" id="varRetailer">
+                <option value="all">All Retailers</option>
+              </select>
+            </div>
+            <div class="field">
+              <div class="field-label">Product</div>
+              <select class="select-input" id="varProduct">
+                <option value="all">All Products</option>
+              </select>
+            </div>
+            <div class="field">
+              <div class="field-label">Chart Type</div>
+              <select class="select-input" id="varChartType">
+                <option value="line">Line</option>
+                <option value="bar">Bar</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="var-summary">
+            <div class="var-sum-item up"><span id="vs-up">0</span> rising</div>
+            <div class="var-sum-item down"><span id="vs-down">0</span> falling</div>
+            <div class="var-sum-item flat"><span id="vs-flat">0</span> stable</div>
+            <div class="var-sum-item"><span id="vs-dates">0</span> dates</div>
+          </div>
+
+          <div style="position:relative;height:260px;margin-top:16px;">
+            <canvas id="overviewChart"></canvas>
           </div>
         </div>
 
-        <div class="controls controls-3">
-          <div class="field">
-            <div class="field-label">Retailer</div>
-            <select class="select-input" id="varRetailer">
-              <option value="all">All Retailers</option>
-            </select>
-          </div>
-          <div class="field">
-            <div class="field-label">Product</div>
-            <select class="select-input" id="varProduct">
-              <option value="all">All Products</option>
-            </select>
-          </div>
-          <div class="field">
-            <div class="field-label">Chart Type</div>
-            <select class="select-input" id="varChartType">
-              <option value="line">Line</option>
-              <option value="bar">Bar</option>
-            </select>
+        <div class="var-grid" id="varChartsGrid"></div>
+
+        <div class="panel" id="varTableCard" style="display:none;">
+          <div class="panel-title">Detail Table</div>
+          <div class="table-scroll" style="margin-top:12px;">
+            <div id="varTableBody"></div>
           </div>
         </div>
+      </section>
 
-        <div class="var-summary">
-          <div class="var-sum-item up"><span id="vs-up">0</span> rising</div>
-          <div class="var-sum-item down"><span id="vs-down">0</span> falling</div>
-          <div class="var-sum-item flat"><span id="vs-flat">0</span> stable</div>
-          <div class="var-sum-item"><span id="vs-dates">0</span> dates</div>
+      <!-- ===================== SCHEDULER ===================== -->
+      <section class="tab-panel" id="tab-scheduler">
+        <div class="panel">
+          <div class="panel-title">Scheduler</div>
+          <div class="panel-sub" style="margin-top:6px;">
+            Not wired up yet. The natural way to add this is a periodic job (cron, APScheduler, or a Celery beat task)
+            on the Flask backend that calls the same routine <code>/api/jobs</code> uses to run <code>scraper.py</code>
+            on an interval, so this tab would just show recent run history and let you edit the schedule.
+          </div>
         </div>
+      </section>
 
-        <div style="position:relative;height:260px;margin-top:16px;">
-          <canvas id="overviewChart"></canvas>
+      <!-- ===================== ADMIN: USER MANAGEMENT ===================== -->
+      <section class="tab-panel" id="tab-admin">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="panel-title">User Management</div>
+              <div class="panel-sub">Create accounts and control who can view, fetch, or administer this app</div>
+            </div>
+          </div>
+
+          <div class="table-scroll">
+            <table class="utbl" id="usersTable">
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="usersBody">
+                <tr>
+                  <td colspan="5">
+                    <div class="empty-state">Loading users…</div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="section-label section-label-spaced">Add New User</div>
+          <div class="add-user-row">
+            <div class="field">
+              <div class="field-label">Username</div>
+              <input class="text-input" id="newUserName" placeholder="e.g. sara">
+            </div>
+            <div class="field">
+              <div class="field-label">Password</div>
+              <input class="text-input" id="newUserPassword" type="password" placeholder="min. 6 characters">
+            </div>
+            <div class="field">
+              <div class="field-label">Role</div>
+              <select class="select-input" id="newUserRole">
+                <option value="viewer">Viewer — view only</option>
+                <option value="editor">Editor — can fetch/scan</option>
+                <option value="admin">Admin — full access</option>
+              </select>
+            </div>
+            <button class="fetch-btn" id="btnAddUser" type="button">+ Add User</button>
+          </div>
+
+          <div class="status-line" id="adminStatus" style="margin-top:18px;">—</div>
         </div>
-      </div>
-
-      <div class="var-grid" id="varChartsGrid"></div>
-
-      <div class="panel" id="varTableCard" style="display:none;">
-        <div class="panel-title">Detail Table</div>
-        <div class="table-scroll" style="margin-top:12px;">
-          <div id="varTableBody"></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ===================== SCHEDULER ===================== -->
-    <section class="tab-panel" id="tab-scheduler">
-      <div class="panel">
-        <div class="panel-title">Scheduler</div>
-        <div class="panel-sub" style="margin-top:6px;">
-          Not wired up yet. The natural way to add this is a periodic job (cron, APScheduler, or a Celery beat task)
-          on the Flask backend that calls the same routine <code>/api/jobs</code> uses to run <code>scraper.py</code>
-          on an interval, so this tab would just show recent run history and let you edit the schedule.
-        </div>
-      </div>
-    </section>
+      </section>
 
   </main>
 

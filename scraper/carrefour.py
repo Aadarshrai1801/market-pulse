@@ -173,6 +173,8 @@ def scrape(url):
                     elif unit == 'g' or unit == 'ml':
                         # normalize a per-gram/per-ml figure up to per-kg/per-litre
                         per_kg_price = f"AED {value * 1000:.2f}"
+                    else:
+                        per_kg_price = main_price
                     break
         except Exception:
             per_kg_price = None
@@ -224,6 +226,12 @@ def scrape(url):
                 price_value = float(price_value_match.group())
                 per_kg_value = price_value / pack_size_kg
                 per_kg_price = f"AED {per_kg_value:.2f}"
+            elif not per_kg_price:
+                # No pack size / unit (kg, g, l, ml) could be found anywhere on the
+                # page, so there's nothing to derive a per-kg price from. Fall back
+                # to treating the item's normal price as its per-kg price rather
+                # than leaving it blank.
+                per_kg_price = main_price
 
         country_of_origin = page.evaluate("""
             () => {

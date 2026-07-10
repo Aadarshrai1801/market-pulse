@@ -766,6 +766,81 @@ tbody tr:hover td.row-head {
     letter-spacing: 0.05em;
 }
 
+/* Price Increased */
+.price-box.price-up {
+    background: rgba(226, 104, 94, .15);
+    border: 1px solid rgba(226, 104, 94, .35);
+}
+
+.price-box.price-up .price-num {
+    color: var(--red);
+}
+
+/* Price Decreased */
+.price-box.price-down {
+    background: rgba(79, 209, 165, .15);
+    border: 1px solid rgba(79, 209, 165, .35);
+}
+
+.price-box.price-down .price-num {
+    color: var(--green);
+}
+
+/* No Change */
+.price-box.price-same {
+    background: var(--cyan-dim);
+}
+
+/* Price increased */
+.price-up {
+    color: #ff5f5f !important;
+    text-shadow:
+        0 0 6px rgba(255, 80, 80, .9),
+        0 0 12px rgba(255, 80, 80, .7),
+        0 0 18px rgba(255, 80, 80, .5);
+    animation: pulseRed 1.2s infinite alternate;
+}
+
+/* Price decreased */
+.price-down {
+    color: #3cff7c !important;
+    text-shadow:
+        0 0 6px rgba(60, 255, 124, .9),
+        0 0 12px rgba(60, 255, 124, .7),
+        0 0 18px rgba(60, 255, 124, .5);
+    animation: pulseGreen 1.2s infinite alternate;
+}
+
+@keyframes pulseRed {
+    from {
+        text-shadow:
+            0 0 4px rgba(255, 80, 80, .7),
+            0 0 8px rgba(255, 80, 80, .5);
+    }
+
+    to {
+        text-shadow:
+            0 0 10px rgba(255, 80, 80, 1),
+            0 0 20px rgba(255, 80, 80, .9),
+            0 0 30px rgba(255, 80, 80, .7);
+    }
+}
+
+@keyframes pulseGreen {
+    from {
+        text-shadow:
+            0 0 4px rgba(60, 255, 124, .7),
+            0 0 8px rgba(60, 255, 124, .5);
+    }
+
+    to {
+        text-shadow:
+            0 0 10px rgba(60, 255, 124, 1),
+            0 0 20px rgba(60, 255, 124, .9),
+            0 0 30px rgba(60, 255, 124, .7);
+    }
+}
+
 .rpill {
     display: inline-block;
     padding: 4px 10px;
@@ -1047,6 +1122,41 @@ tbody td.price-cell {
     letter-spacing: 0.04em;
 }
 
+/* ---------------- pivot table: last-column trend vs. previous fetch ---------------- */
+/* Same convention as elsewhere: price UP (costs more) = red, DOWN (cheaper) = green. */
+
+tbody td.price-cell.trend-up {
+    background: rgba(226, 104, 94, 0.12);
+}
+
+tbody td.price-cell.trend-down {
+    background: rgba(79, 209, 165, 0.12);
+}
+
+.price-num.trend-up {
+    color: var(--red);
+}
+
+.price-num.trend-down {
+    color: var(--green);
+}
+
+.pivot-trend {
+    display: inline-block;
+    margin-left: 4px;
+    font-size: 10px;
+    vertical-align: middle;
+    cursor: default;
+}
+
+.pivot-trend.up {
+    color: var(--red);
+}
+
+.pivot-trend.down {
+    color: var(--green);
+}
+
 /* ---------------- detail table: clickable "verify on retailer site" price ---------------- */
 /* Same look as .price-box, but as a link with a hover state and a small external-link icon. */
 
@@ -1078,6 +1188,40 @@ tbody td.price-cell {
     margin-left: 1px;
     vertical-align: middle;
     transition: opacity 0.15s ease;
+}
+
+/* ---------------- detail table: price trend vs. previous date on record ---------------- */
+/* Convention: a price INCREASE is red (costs more), a DECREASE is green (cheaper) -
+   the reverse of a typical stock ticker, since this tracks cost, not portfolio value. */
+.trend-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 9px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    cursor: default;
+}
+
+.trend-badge.up {
+    background: rgba(226, 104, 94, 0.15);
+    color: var(--red);
+    border: 1px solid rgba(226, 104, 94, 0.3);
+}
+
+.trend-badge.down {
+    background: rgba(79, 209, 165, 0.15);
+    color: var(--green);
+    border: 1px solid rgba(79, 209, 165, 0.3);
+}
+
+.trend-badge.flat {
+    background: var(--panel-2);
+    color: var(--dim);
+    border: 1px solid var(--border);
 }
 
 .ocr-upload-area {
@@ -1153,4 +1297,208 @@ tbody td.price-cell {
 #ocrTable {
     width: 100%;
     border-collapse: collapse;
+}
+
+/* ==================================================================
+   AUTH: login page
+   ================================================================== */
+
+.login-body {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--panel-3);
+}
+
+.login-card {
+    width: 100%;
+    max-width: 380px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 36px 32px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+
+.login-title {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--text);
+    text-align: center;
+}
+
+.login-sub {
+    font-size: 12.5px;
+    color: var(--dim);
+    text-align: center;
+    margin-top: 4px;
+    margin-bottom: 24px;
+}
+
+.login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.login-submit {
+    width: 100%;
+    justify-content: center;
+    margin-top: 4px;
+}
+
+/* ==================================================================
+   AUTH: topbar user badge + logout
+   ================================================================== */
+
+.user-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    font-size: 12.5px;
+    color: var(--text);
+    white-space: nowrap;
+}
+
+.user-badge .role-chip {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+.role-chip.role-admin {
+    background: rgba(226, 104, 94, 0.18);
+    color: var(--red);
+}
+
+.role-chip.role-editor {
+    background: rgba(63, 167, 255, 0.18);
+    color: var(--cyan);
+}
+
+.role-chip.role-viewer {
+    background: rgba(92, 107, 122, 0.25);
+    color: var(--dim);
+}
+
+.logout-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.logout-btn:hover {
+    color: var(--red);
+    border-color: rgba(226, 104, 94, 0.4);
+}
+
+/* ==================================================================
+   ADMIN: user management panel
+   ================================================================== */
+
+.utbl {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.utbl th {
+    text-align: left;
+    padding: 10px 12px;
+    color: var(--dim);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--border);
+}
+
+.utbl td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-soft);
+    color: var(--text);
+    vertical-align: middle;
+}
+
+.utbl tbody tr:hover {
+    background: rgba(63, 167, 255, 0.05);
+}
+
+.utbl .status-active {
+    color: var(--green);
+    font-weight: 700;
+    font-size: 12px;
+}
+
+.utbl .status-inactive {
+    color: var(--dim);
+    font-weight: 700;
+    font-size: 12px;
+}
+
+.utbl .role-select {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+.utbl .row-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.utbl .row-actions button {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--dim);
+    border-radius: 6px;
+    padding: 4px 9px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.utbl .row-actions button:hover {
+    color: var(--cyan);
+    border-color: rgba(63, 167, 255, 0.4);
+}
+
+.utbl .row-actions button.danger:hover {
+    color: var(--red);
+    border-color: rgba(226, 104, 94, 0.4);
+}
+
+.add-user-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    margin-top: 18px;
+}
+
+.add-user-row .field {
+    min-width: 150px;
+}
+
+/* Buttons disabled specifically because the account is view-only (as opposed
+   to disabled while a request is in flight) - same look, but cursor makes the
+   "why can't I click this" reason discoverable via the title tooltip. */
+.disabled-viewer {
+    cursor: not-allowed;
 }

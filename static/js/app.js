@@ -1,12 +1,16 @@
 import {
-  appState, loadState, saveState, setStatus, escapeHtml, formatPrice, flag, countryCode, normalizeCountryName,
+  appState, loadState, saveState, setStatus, escapeHtml, formatPrice, normalizeCountryName, getFullCountryName,
   createRetailerPill, getProductMeta, normalizeRetailerId, normalizeProductId,
 } from './utils.js';
 import {
   loadMeta, createJob, pollJob, loadHistory as loadHistoryApi, mapHistoryResponse, mapScrapeResult, ocrScan,
+  getCurrentUser, logout,
 } from './api.js';
 import { renderProductTags, renderProductSelect, renderPresets, addProduct, resetProducts, removeProduct } from './products.js';
 import { renderVariationCharts } from './charts.js';
+import { initAdminTab } from './admin.js';
+
+let currentUser = null; // { id, username, role } — set once during init()
 
 const fetchState = { selectedRetailer: 'all', selectedProduct: 'all' };
 let lastPivot = null;   // { dates, rows, counts }
@@ -45,6 +49,7 @@ function savePersistedDetail(rows) {
 /* ============================== TABS ============================== */
 
 function bindTabs() {
+  let adminTabInitialized = false;
   document.querySelectorAll('.tab-btn').forEach((button) => {
     button.addEventListener('click', () => {
       document.querySelectorAll('.tab-btn').forEach((tab) => tab.classList.toggle('active', tab === button));
@@ -52,8 +57,78 @@ function bindTabs() {
       const id = button.getAttribute('data-tab');
       document.getElementById(`tab-${id}`)?.classList.add('active');
       if (id === 'variation') renderVariationTab();
+      if (id === 'admin' && !adminTabInitialized && currentUser) {
+        adminTabInitialized = true;
+        initAdminTab(currentUser.id);
+      }
     });
   });
+}
+
+/* ============================== AUTH: topbar + role gating ============================== */
+
+// Roles below "editor" (i.e. viewer) can look at everything but can't
+// trigger scrapes or OCR scans - those buttons are disabled rather than
+// hidden, so it's clear the feature exists but requires a higher role.
+function applyRoleGating(user) {
+  const isViewer = user.role === 'viewer';
+  const isAdmin = user.role === 'admin';
+
+  document.getElementById('adminTabBtn').style.display = isAdmin ? '' : 'none';
+
+  ['fetchBtn', 'syncBtn'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.disabled = isViewer;
+    el.title = isViewer ? 'Your account is view-only — ask an admin for Editor access to fetch prices.' : '';
+    el.classList.toggle('disabled-viewer', isViewer);
+  });
+
+  const ocrButton = document.getElementById('btnOCR');
+  if (ocrButton) {
+    ocrButton.disabled = isViewer;
+    ocrButton.title = isViewer ? 'Your account is view-only — ask an admin for Editor access to run OCR scans.' : '';
+  }
+}
+
+function renderUserBadge(user) {
+  const badge = document.getElementById('userBadge');
+  const nameEl = document.getElementById('userBadgeName');
+  const roleEl = document.getElementById('userBadgeRole');
+  const logoutBtn = document.getElementById('logoutBtn');
+  if (!badge) return;
+
+  nameEl.textContent = user.username;
+  roleEl.textContent = user.role;
+  roleEl.className = `role-chip role-${user.role}`;
+  badge.style.display = '';
+  logoutBtn.style.display = '';
+}
+
+function bindLogout() {
+  document.getElementById('logoutBtn')?.addEventListener('click', async () => {
+    try {
+      await logout();
+    } finally {
+      window.location.href = '/login';
+    }
+  });
+}
+
+// Confirms there's a valid session before wiring up the rest of the app.
+// The Flask "/" route already redirects unauthenticated requests to
+// /login, but this catches the case where a cached page is opened after
+// the session has since expired server-side.
+async function initAuth() {
+  const user = await getCurrentUser().catch(() => null);
+  if (!user) {
+    window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
+    return null;
+  }
+  currentUser = user;
+  renderUserBadge(user);
+  applyRoleGating(user);
+  return user;
 }
 
 /* ============================== HEADER ============================== */
@@ -177,6 +252,16 @@ function flattenPivot(payload) {
   return rows;
 }
 
+// Walks backwards from colIdx through this row's own price history to find the
+// closest earlier date it actually has a price for (dates can be sparse per row).
+function findPriorPivotPrice(row, dates, colIdx) {
+  for (let i = colIdx - 1; i >= 0; i--) {
+    const value = row.prices[dates[i]];
+    if (value !== undefined && value !== null) return Number(value);
+  }
+  return null;
+}
+
 function renderPivotTable(data) {
   const headRow = document.getElementById('headRow');
   const bodyRows = document.getElementById('bodyRows');
@@ -247,7 +332,7 @@ function renderPivotTable(data) {
       retailerCell.innerHTML = createRetailerPill(row.retailer_id || row.retailer_label);
       tr.appendChild(retailerCell);
 
-      dates.forEach((iso) => {
+      dates.forEach((iso, colIdx) => {
         const td = document.createElement('td');
         const value = row.prices[iso];
         // origin can differ day to day, so look it up per-date rather than
@@ -261,8 +346,25 @@ function renderPivotTable(data) {
           td.textContent = '—';
         } else {
           td.className = 'price-cell';
-          td.innerHTML = `<div class="price-num">${Number(value).toFixed(2)}</div>` +
-            (origin && origin !== '—' ? `<div class="price-country" title="${escapeHtml(origin)}"><span class="origin-code">${escapeHtml(countryCode(origin))}</span></div>` : '');
+          // Only the last (most recent) date column gets an up/down indicator,
+          // comparing against the closest earlier date this row has a price for.
+          let trendHtml = '';
+          let priceNumClass = 'price-num';
+          if (colIdx === dates.length - 1) {
+            const prior = findPriorPivotPrice(row, dates, colIdx);
+            if (prior !== null && prior > 0 && Number(value) > 0) {
+              const diff = Number(value) - prior;
+              if (Math.abs(diff) >= 0.005) {
+                const up = diff > 0;
+                const dir = up ? 'up' : 'down';
+                td.className = `price-cell trend-${dir}`;
+                priceNumClass = `price-num trend-${dir}`;
+                trendHtml = `<span class="pivot-trend ${dir}" title="${up ? 'Up' : 'Down'} vs ${formatPrice(prior)} AED previous fetch">${up ? '▲' : '▼'}</span>`;
+              }
+            }
+          }
+          td.innerHTML = `<div class="${priceNumClass}">${Number(value).toFixed(2)}${trendHtml}</div>` +
+            (origin && origin !== '—' ? `<div class="price-country" title="${escapeHtml(origin)}"><span class="origin-code">${escapeHtml(origin)}</span></div>` : '');
         }
         tr.appendChild(td);
       });
@@ -300,17 +402,30 @@ async function loadPivot() {
 /* ============================== DETAIL TABLE (latest fetch) ============================== */
 
 // Search-URL patterns per retailer, used to build the "click to verify" link on each price.
-// Keyed by normalized retailer id (same normalization used elsewhere via normalizeRetailerId).
+// Keyed by a fully-collapsed alphanumeric id (see collapseRetailerKey below) rather than
+// whatever normalizeRetailerId happens to produce - that only lowercases and collapses
+// whitespace, so "Union Coop" normalizes to "union coop" while this map used to be keyed
+// "union_coop": an exact-string mismatch that silently dropped the verify link for Union
+// Coop specifically while the single-word retailer names matched by coincidence.
 const RETAILER_SEARCH_URLS = {
   carrefour: 'https://www.carrefouruae.com/mafuae/en/search?keyword=',
   lulu: 'https://www.luluhypermarket.com/en-ae/search?q=',
   barakat: 'https://www.barakatfresh.com/search?q=',
   kibsons: 'https://www.kibsons.com/search?q=',
-  union_coop: 'https://www.unioncoop.ae/en/search?q=',
+  unioncoop: 'https://www.unioncoop.ae/en/search?q=',
 };
 
+// Strips spaces, underscores, and hyphens entirely (in addition to lowercasing) so any
+// spelling/formatting variant of a retailer id or name - "Union Coop", "union_coop",
+// "UnionCoop", "union-coop" - collapses to the same lookup key ("unioncoop"). This is
+// deliberately more permissive than normalizeRetailerId, which is used elsewhere for
+// display/grouping and needs to preserve word boundaries.
+function collapseRetailerKey(value) {
+  return String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+}
+
 function buildVerifyUrl(retailerId, productLabel) {
-  const key = normalizeRetailerId(retailerId);
+  const key = collapseRetailerKey(retailerId);
   const base = RETAILER_SEARCH_URLS[key];
   if (!base) return null;
   return base + encodeURIComponent(productLabel || '');
@@ -348,6 +463,56 @@ function mergeDetailRows(existingRows, incomingRows) {
   return [...map.values()];
 }
 
+// Looks up the most recent price on record for this product/retailer that's
+// strictly before item.date. The detail table only ever holds the latest
+// fetch (one row per product/retailer), so "previous price" has to come
+// from the multi-date history (lastPivot), not from the detail rows
+// themselves.
+function findPreviousDatedPrice(item) {
+  if (!lastPivot || !Array.isArray(lastPivot.rows) || !lastPivot.rows.length) return null;
+
+  const pivotRow = lastPivot.rows.find((row) =>
+    normalizeRetailerId(row.retailer_id || row.retailer_label) === normalizeRetailerId(item.retailer) &&
+    normalizeProductId(row.product_id || row.product_label) === normalizeProductId(item.product)
+  );
+  if (!pivotRow || !pivotRow.prices) return null;
+
+  // ISO "YYYY-MM-DD" strings sort correctly with a plain string sort.
+  const priorDates = Object.keys(pivotRow.prices)
+    .filter((d) => d < item.date && pivotRow.prices[d] !== undefined && pivotRow.prices[d] !== null)
+    .sort();
+  if (!priorDates.length) return null;
+
+  const previousDate = priorDates[priorDates.length - 1];
+  return { date: previousDate, price: Number(pivotRow.prices[previousDate]) || 0 };
+}
+
+// Small up/down indicator comparing today's fetched price to the closest
+// earlier date on record for the same product/retailer.
+//
+// Convention: a price INCREASE is flagged red (it now costs more), a
+// DECREASE is flagged green (it's now cheaper) - the reverse of a typical
+// stock ticker, since this is tracking cost rather than portfolio value.
+// If there's no earlier price to compare against, nothing renders rather
+// than guessing a direction.
+function buildTrendBadge(item) {
+  const previous = findPreviousDatedPrice(item);
+  if (!previous || !(previous.price > 0) || !(item.price > 0)) {
+    return '<span class="mu">—</span>';
+  }
+
+  const diff = item.price - previous.price;
+  const pct = (diff / previous.price) * 100;
+  const prevTitle = `vs ${formatPrice(previous.price)} AED on ${escapeHtml(previous.date)}`;
+
+  if (Math.abs(diff) < 0.005) {
+    return `<span class="trend-badge flat" title="No change ${prevTitle}">▬ 0.0%</span>`;
+  }
+  const up = diff > 0;
+  return `<span class="trend-badge ${up ? 'up' : 'down'}" title="${up ? 'Up' : 'Down'} ${prevTitle}">` +
+    `${up ? '▲' : '▼'} ${up ? '+' : '−'}${Math.abs(pct).toFixed(1)}%</span>`;
+}
+
 function renderDetailTable(rows) {
   const panel = document.getElementById('detailPanel');
   const wrap = document.getElementById('detailWrap');
@@ -356,7 +521,7 @@ function renderDetailTable(rows) {
   panel.style.display = 'block';
 
   const sorted = [...rows].sort((a, b) => a.product.localeCompare(b.product) || a.retailer.localeCompare(b.retailer));
-  const html = '<table class="dtbl"><thead><tr><th>Date</th><th>Product</th><th>Retailer</th><th>Price</th><th>Unit</th><th>Origin Country</th><th>Fetched At</th></tr></thead><tbody>' +
+  const html = '<table class="dtbl"><thead><tr><th>Date</th><th>Product</th><th>Retailer</th><th>Price</th><th>Trend</th><th>Unit</th><th>Origin Country</th><th>Fetched At</th></tr></thead><tbody>' +
     sorted.map((item) => {
       const meta = getProductMeta(item.product);
       const verifyUrl = item.price > 0 ? buildVerifyUrl(item.retailer, meta.name || item.product) : null;
@@ -376,13 +541,14 @@ function renderDetailTable(rows) {
         <td><div class="prod-cell"><span class="prod-emoji">${meta.emoji || '🛒'}</span><span class="prod-name">${escapeHtml(meta.name || item.product)}</span></div></td>
         <td>${createRetailerPill(item.retailer)}</td>
         <td>${priceCell}</td>
+        <td>${buildTrendBadge(item)}</td>
         <td class="mu">per kg</td>
-        <td><span style="font-size:15px;margin-right:5px;">${flag(item.origin_country)}</span><span class="mu">${escapeHtml(normalizeCountryName(item.origin_country) || '—')}</span></td>
+        <td><span class="origin-code" style="margin-right:6px;">${escapeHtml(normalizeCountryName(item.origin_country))}</span><span class="mu">${escapeHtml(getFullCountryName(item.origin_country))}</span></td>
         <td class="mu">${escapeHtml(item.fetched_at ? new Date(item.fetched_at).toLocaleTimeString('en-AE') : '—')}</td>
       </tr>`;
     }).join('') + '</tbody></table>';
   wrap.innerHTML = html;
-  sub.textContent = `${rows.length} row${rows.length === 1 ? '' : 's'} · one row per product per retailer, latest fetch only · click any price to verify on retailer site`;
+  sub.textContent = `${rows.length} row${rows.length === 1 ? '' : 's'} · one row per product per retailer, latest fetch only · click any price to verify on retailer site · trend vs. previous date on record`;
 }
 
 /* ============================== FETCH ACTION ============================== */
@@ -653,7 +819,22 @@ function renderOcrResults(items) {
     return;
   }
 
-  body.innerHTML = items.map((item, index) => `
+  body.innerHTML = items.map((item, index) => {
+
+    let priceClass = "price-same";
+
+    if (item.previous_price !== undefined &&
+        item.previous_price !== null &&
+        item.previous_price > 0) {
+
+        if (item.price > item.previous_price) {
+            priceClass = "price-up";      // Price increased → Red
+        } else if (item.price < item.previous_price) {
+            priceClass = "price-down";    // Price decreased → Green
+        }
+    }
+
+    return `
     <tr>
       <td>${index + 1}</td>
       <td><b>${escapeHtml(item.country)}</b></td>
@@ -661,14 +842,23 @@ function renderOcrResults(items) {
       <td><div class="prod-name">${escapeHtml(item.product)}</div></td>
       <td>${escapeHtml(item.weight)}</td>
       <td>${escapeHtml(item.packing)}</td>
+
       <td>
-        <div class="price-box">
-          <span class="price-num">${item.price > 0 ? item.price.toFixed(2) : 'NA'}</span>
+        <div class="price-box ${priceClass}">
+          <span class="price-num">
+            ${item.price > 0 ? item.price.toFixed(2) : 'NA'}
+          </span>
         </div>
       </td>
-      <td>${item.price > 0 ? '<span style="color:var(--green)">✓ Valid</span>' : '<span style="color:var(--orange)">⚠ NA / Unpriced</span>'}</td>
+
+      <td>
+        ${item.price > 0
+            ? '<span style="color:var(--green)">✓ Valid</span>'
+            : '<span style="color:var(--orange)">⚠ NA / Unpriced</span>'}
+      </td>
     </tr>
-  `).join('');
+    `;
+}).join('');
 }
 
 function updateOcrStats(items, overallConfidence, imageCount) {
@@ -837,7 +1027,7 @@ function bindOCR() {
       // Release engine locks safely if this context is still relevant
       if (thisScanId === currentScanId) {
         isScanning = false;
-        btnOCR.disabled = false;
+        btnOCR.disabled = currentUser?.role === 'viewer';
         if (btnClearOCR) btnClearOCR.disabled = false;
       }
     }
@@ -847,7 +1037,7 @@ function bindOCR() {
   btnClearOCR?.addEventListener('click', () => {
     currentScanId++; // Invalidate running async promises on reset
     isScanning = false;
-    btnOCR.disabled = false;
+    btnOCR.disabled = currentUser?.role === 'viewer';
     if (btnClearOCR) btnClearOCR.disabled = false;
     clearOcr();
   });
@@ -877,6 +1067,10 @@ function bindOCR() {
 /* ============================== INIT ============================== */
 
 async function init() {
+  const user = await initAuth();
+  if (!user) return; // initAuth() is already redirecting to /login
+  bindLogout();
+
   loadState();
   setDateChip();
   bindTabs();

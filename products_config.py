@@ -58,7 +58,7 @@ PRODUCTS = [
         "emoji": "🍅",
         "keywords": {
             "barakat": "Tomato",
-            "kibsons": "Tomato",
+            "kibsons": "tomato",
             "unioncoop": "tomato",
             "carrefour": "Tomato",
             "lulu": "Tomato",

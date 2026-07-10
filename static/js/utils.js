@@ -167,6 +167,40 @@ const COUNTRY_SHORT_NAMES = {
 // substring accidentally would.
 const COUNTRY_SHORT_NAME_KEYS = Object.keys(COUNTRY_SHORT_NAMES).sort((a, b) => b.length - a.length);
 
+// Proper full display name for each short form above, used wherever a table
+// wants to spell the country out (as opposed to the compact short/code form).
+const COUNTRY_FULL_NAMES = {
+  UAE: 'United Arab Emirates',
+  USA: 'United States of America',
+  UK: 'United Kingdom',
+  KSA: 'Saudi Arabia',
+  China: 'China',
+  Egypt: 'Egypt',
+  India: 'India',
+  Pakistan: 'Pakistan',
+  Oman: 'Oman',
+  Jordan: 'Jordan',
+  'South Africa': 'South Africa',
+  Australia: 'Australia',
+  Turkey: 'Turkey',
+  Spain: 'Spain',
+  Morocco: 'Morocco',
+  Iran: 'Iran',
+  Kenya: 'Kenya',
+  Netherlands: 'Netherlands',
+  Brazil: 'Brazil',
+  Peru: 'Peru',
+  Lebanon: 'Lebanon',
+  Philippines: 'Philippines',
+  Thailand: 'Thailand',
+};
+
+export function getFullCountryName(country) {
+  if (!country || country === '—') return '—';
+  const short = normalizeCountryName(country);
+  return COUNTRY_FULL_NAMES[short] || short;
+}
+
 export function normalizeCountryName(country) {
   if (!country || country === '—') return '—';
   const cleaned = String(country).trim().toLowerCase().replace(/\s+/g, ' ');

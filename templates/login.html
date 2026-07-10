@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign in · MarketPulse</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body class="login-body">
+
+    <div class="login-card">
+        <div class="brand" style="justify-content:center;margin-bottom:22px;">
+            <div class="brand-logo">🌿</div>
+            <div class="brand-text">
+                <div class="brand-name">MARKETPULSE</div>
+                <div class="brand-sub">UAE FRESH PRODUCE</div>
+            </div>
+        </div>
+
+        <div class="login-title">Sign in</div>
+        <div class="login-sub">Enter your credentials to continue</div>
+
+        <form id="loginForm" class="login-form" autocomplete="on">
+            <div class="field">
+                <div class="field-label">Username</div>
+                <input class="text-input" id="loginUsername" name="username" type="text" autocomplete="username"
+                    autofocus>
+            </div>
+            <div class="field">
+                <div class="field-label">Password</div>
+                <input class="text-input" id="loginPassword" name="password" type="password"
+                    autocomplete="current-password">
+            </div>
+
+            <button class="fetch-btn login-submit" id="loginSubmit" type="submit">Sign In</button>
+            <div class="status-line" id="loginStatus" style="display:none;"></div>
+        </form>
+    </div>
+
+    <script>
+        const form = document.getElementById('loginForm');
+        const status = document.getElementById('loginStatus');
+        const submitBtn = document.getElementById('loginSubmit');
+
+        function showError(message) {
+            status.textContent = message;
+            status.className = 'status-line error';
+            status.style.display = 'block';
+        }
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const username = document.getElementById('loginUsername').value.trim();
+            const password = document.getElementById('loginPassword').value;
+
+            if (!username || !password) {
+                showError('Enter both a username and password.');
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Signing in…';
+
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password }),
+                });
+                const data = await response.json().catch(() => ({}));
+
+                if (!response.ok || !data.ok) {
+                    showError(data.error || 'Invalid username or password.');
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Sign In';
+                    return;
+                }
+
+                const params = new URLSearchParams(window.location.search);
+                window.location.href = params.get('next') || '/';
+            } catch (error) {
+                showError('Could not reach the server. Please try again.');
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Sign In';
+            }
+        });
+    </script>
+
+</body>
+
+</html>
