@@ -27,10 +27,15 @@ Wire this into app.py like:
 """
 
 import os
+import secrets
 import sqlite3
+import time
+from collections import defaultdict
 from datetime import datetime
 from functools import wraps
+from urllib.parse import urlencode
 
+import requests
 from flask import Blueprint, request, jsonify, session, render_template, redirect, url_for, g
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -38,7 +43,51 @@ DB_PATH = os.environ.get("USERS_DB_PATH", "users.db")
 ROLES = ("viewer", "editor", "admin")
 ROLE_RANK = {"viewer": 0, "editor": 1, "admin": 2}
 
+# ------------------------------------------------------------------
+# Basic login rate limiting (in-process - fine for a single gunicorn
+# worker, which is what this app should run as; see JOBS note in app.py).
+# For anything beyond a single worker/instance, swap this for
+# Flask-Limiter backed by Redis instead.
+# ------------------------------------------------------------------
+LOGIN_RATE_LIMIT = 8            # attempts...
+LOGIN_RATE_WINDOW_SECONDS = 300  # ...per rolling 5 minutes, per IP
+_login_attempts = defaultdict(list)
+
+
+def _login_rate_limited(ip):
+    now = time.time()
+    attempts = [t for t in _login_attempts[ip] if now - t < LOGIN_RATE_WINDOW_SECONDS]
+    _login_attempts[ip] = attempts
+    return len(attempts) >= LOGIN_RATE_LIMIT
+
+
+def _record_login_attempt(ip):
+    _login_attempts[ip].append(time.time())
+
+# ------------------------------------------------------------------
+# Google OAuth config
+# ------------------------------------------------------------------
+# Set these three env vars to turn on the "Continue with Google" button.
+# Create credentials at https://console.cloud.google.com/apis/credentials
+# (OAuth client ID -> Web application) and add GOOGLE_REDIRECT_URI as an
+# authorized redirect URI there, e.g. https://yourdomain.com/auth/google/callback
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI", "")
+
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
+
+# New accounts created via "Continue with Google" get this role. An admin
+# can promote them afterwards from the User Management panel.
+GOOGLE_DEFAULT_ROLE = os.environ.get("GOOGLE_DEFAULT_ROLE", "viewer")
+
 auth_bp = Blueprint("auth", __name__)
+
+
+def google_oauth_configured():
+    return bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI)
 
 
 # ------------------------------------------------------------------
@@ -49,6 +98,15 @@ def _get_conn():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _ensure_column(conn, table, column, coltype_sql):
+    """Adds `column` to `table` if it isn't there yet — lets older users.db
+    files (from before Google login / last-seen tracking existed) upgrade
+    in place instead of needing to be deleted and recreated."""
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype_sql}")
 
 
 def init_auth(app):
@@ -68,6 +126,14 @@ def init_auth(app):
             created_at TEXT NOT NULL
         )
     """)
+    conn.commit()
+
+    # Additive migrations — safe to run every startup.
+    _ensure_column(conn, "users", "auth_provider", "TEXT NOT NULL DEFAULT 'local'")
+    _ensure_column(conn, "users", "google_id", "TEXT")
+    _ensure_column(conn, "users", "avatar_url", "TEXT")
+    _ensure_column(conn, "users", "last_login_at", "TEXT")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)")
     conn.commit()
 
     count = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
@@ -108,13 +174,49 @@ def get_user_by_username(username):
     return dict(row) if row else None
 
 
-def list_users():
+def list_users(search=None, role=None, status=None):
+    """
+    Returns users, optionally filtered by a case-insensitive username
+    substring (`search`), an exact `role`, and `status` ('active' /
+    'inactive'). All filters are optional and combine with AND.
+    """
+    query = (
+        "SELECT id, username, role, is_active, created_at, auth_provider, "
+        "avatar_url, last_login_at FROM users WHERE 1=1"
+    )
+    params = []
+
+    if search:
+        query += " AND username LIKE ?"
+        params.append(f"%{search.strip()}%")
+    if role in ROLES:
+        query += " AND role = ?"
+        params.append(role)
+    if status == "active":
+        query += " AND is_active = 1"
+    elif status == "inactive":
+        query += " AND is_active = 0"
+
+    query += " ORDER BY id"
+
     conn = _get_conn()
-    rows = conn.execute(
-        "SELECT id, username, role, is_active, created_at FROM users ORDER BY id"
-    ).fetchall()
+    rows = conn.execute(query, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_user_stats():
+    """Summary counters for the User Management panel's stats bar."""
+    all_users = list_users()
+    return {
+        "total": len(all_users),
+        "active": sum(1 for u in all_users if u["is_active"]),
+        "inactive": sum(1 for u in all_users if not u["is_active"]),
+        "admins": sum(1 for u in all_users if u["role"] == "admin"),
+        "editors": sum(1 for u in all_users if u["role"] == "editor"),
+        "viewers": sum(1 for u in all_users if u["role"] == "viewer"),
+        "google_linked": sum(1 for u in all_users if u["auth_provider"] == "google"),
+    }
 
 
 def create_user(username, password, role):
@@ -187,6 +289,16 @@ def delete_user(user_id):
     conn.close()
 
 
+def _touch_last_login(user_id):
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE users SET last_login_at = ? WHERE id = ?",
+        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
 def verify_login(username, password):
     """Returns the user row (dict) on success, or None on any failure."""
     user = get_user_by_username((username or "").strip())
@@ -194,7 +306,71 @@ def verify_login(username, password):
         return None
     if not check_password_hash(user["password_hash"], password or ""):
         return None
+    _touch_last_login(user["id"])
+    user["last_login_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return user
+
+
+def find_or_create_google_user(google_id, email, avatar_url=None):
+    """
+    Resolves a verified Google identity to a local user row, in order:
+      1. An account already linked to this google_id -> log in, refresh avatar.
+      2. An existing local account with a matching username/email -> link it
+         (safe because Google has already verified the email ownership).
+      3. Otherwise, create a brand-new account with GOOGLE_DEFAULT_ROLE.
+
+    Returns the user dict, or None if a matched account is deactivated.
+    """
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = _get_conn()
+
+    row = conn.execute("SELECT * FROM users WHERE google_id = ?", (google_id,)).fetchone()
+    if row:
+        user = dict(row)
+        if not user["is_active"]:
+            conn.close()
+            return None
+        conn.execute(
+            "UPDATE users SET avatar_url = ?, last_login_at = ? WHERE id = ?",
+            (avatar_url, now, user["id"]),
+        )
+        conn.commit()
+        conn.close()
+        user["avatar_url"] = avatar_url
+        user["last_login_at"] = now
+        return user
+
+    row = conn.execute("SELECT * FROM users WHERE username = ?", (email,)).fetchone()
+    if row:
+        user = dict(row)
+        if not user["is_active"]:
+            conn.close()
+            return None
+        conn.execute(
+            "UPDATE users SET google_id = ?, auth_provider = 'google', avatar_url = ?, "
+            "last_login_at = ? WHERE id = ?",
+            (google_id, avatar_url, now, user["id"]),
+        )
+        conn.commit()
+        conn.close()
+        user.update(google_id=google_id, auth_provider="google", avatar_url=avatar_url, last_login_at=now)
+        return user
+
+    # Brand-new account. It still gets a (random, unusable) password hash so
+    # the NOT NULL column is satisfied; the user can set a real password
+    # later from Account Settings if they also want local sign-in.
+    unusable_hash = generate_password_hash(secrets.token_hex(32))
+    role = GOOGLE_DEFAULT_ROLE if GOOGLE_DEFAULT_ROLE in ROLES else "viewer"
+    cursor = conn.execute(
+        "INSERT INTO users (username, password_hash, role, is_active, created_at, "
+        "auth_provider, google_id, avatar_url, last_login_at) "
+        "VALUES (?, ?, ?, 1, ?, 'google', ?, ?, ?)",
+        (email, unusable_hash, role, now, google_id, avatar_url, now),
+    )
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+    return get_user_by_id(new_id)
 
 
 # ------------------------------------------------------------------
@@ -249,7 +425,15 @@ def role_required(*roles):
 
 
 def _public_user(user):
-    return {"id": user["id"], "username": user["username"], "role": user["role"]}
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "role": user["role"],
+        "auth_provider": user.get("auth_provider") or "local",
+        "avatar_url": user.get("avatar_url"),
+        "created_at": user.get("created_at"),
+        "last_login_at": user.get("last_login_at"),
+    }
 
 
 # ------------------------------------------------------------------
@@ -260,14 +444,24 @@ def _public_user(user):
 def login_page():
     if current_user():
         return redirect(url_for("index"))
-    return render_template("login.html")
+    return render_template("login.html", google_enabled=google_oauth_configured())
 
 
 @auth_bp.route("/api/auth/login", methods=["POST"])
 def api_login():
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr) or "unknown"
+    ip = ip.split(",")[0].strip()  # first hop if behind a proxy chain
+
+    if _login_rate_limited(ip):
+        return jsonify({
+            "ok": False,
+            "error": "Too many login attempts. Please wait a few minutes and try again.",
+        }), 429
+
     payload = request.get_json(force=True, silent=True) or {}
     user = verify_login(payload.get("username"), payload.get("password"))
     if not user:
+        _record_login_attempt(ip)
         return jsonify({"ok": False, "error": "Invalid username or password."}), 401
 
     session.clear()
@@ -281,6 +475,90 @@ def api_login():
 def api_logout():
     session.clear()
     return jsonify({"ok": True})
+
+
+# ------------------------------------------------------------------
+# Routes: Google OAuth ("Continue with Google")
+# ------------------------------------------------------------------
+
+@auth_bp.route("/auth/google/login")
+def google_login():
+    if current_user():
+        return redirect(url_for("index"))
+    if not google_oauth_configured():
+        return redirect(url_for("auth.login_page", error="google_not_configured"))
+
+    state = secrets.token_urlsafe(24)
+    session["oauth_state"] = state
+    session["oauth_next"] = request.args.get("next") or url_for("index")
+
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+        "prompt": "select_account",
+    }
+    return redirect(f"{GOOGLE_AUTH_URL}?{urlencode(params)}")
+
+
+@auth_bp.route("/auth/google/callback")
+def google_callback():
+    if request.args.get("error"):
+        return redirect(url_for("auth.login_page", error="google_auth_failed"))
+
+    expected_state = session.pop("oauth_state", None)
+    next_path = session.pop("oauth_next", None) or url_for("index")
+    state = request.args.get("state")
+    code = request.args.get("code")
+
+    if not code or not state or state != expected_state:
+        return redirect(url_for("auth.login_page", error="google_auth_failed"))
+
+    try:
+        token_response = requests.post(
+            GOOGLE_TOKEN_URL,
+            data={
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": GOOGLE_REDIRECT_URI,
+            },
+            timeout=10,
+        )
+        token_response.raise_for_status()
+        access_token = token_response.json().get("access_token")
+        if not access_token:
+            raise ValueError("Google did not return an access token.")
+
+        userinfo_response = requests.get(
+            GOOGLE_USERINFO_URL,
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        userinfo_response.raise_for_status()
+        info = userinfo_response.json()
+    except Exception:
+        return redirect(url_for("auth.login_page", error="google_auth_failed"))
+
+    if not info.get("email") or not info.get("email_verified", True):
+        return redirect(url_for("auth.login_page", error="google_email_unverified"))
+
+    user = find_or_create_google_user(
+        google_id=info["sub"],
+        email=info["email"],
+        avatar_url=info.get("picture"),
+    )
+    if not user:
+        return redirect(url_for("auth.login_page", error="account_deactivated"))
+
+    session.clear()
+    session["user_id"] = user["id"]
+    session.permanent = True
+
+    return redirect(next_path)
 
 
 @auth_bp.route("/api/auth/me")
@@ -353,7 +631,16 @@ def api_update_own_profile():
 @auth_bp.route("/api/users", methods=["GET"])
 @role_required("admin")
 def api_list_users():
-    return jsonify({"ok": True, "users": list_users()})
+    search = request.args.get("search") or None
+    role = request.args.get("role") or None
+    status = request.args.get("status") or None
+    return jsonify({"ok": True, "users": list_users(search=search, role=role, status=status)})
+
+
+@auth_bp.route("/api/users/stats", methods=["GET"])
+@role_required("admin")
+def api_user_stats():
+    return jsonify({"ok": True, "stats": get_user_stats()})
 
 
 @auth_bp.route("/api/users", methods=["POST"])

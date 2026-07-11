@@ -74,12 +74,26 @@ export async function updateOwnProfile(currentPassword, newUsername, newPassword
 
 // ---- Admin: user management ----
 
-export async function listUsers() {
-  const response = await fetch(`${API_BASE}/api/users?_=${Date.now()}`, { cache: 'no-store' });
+export async function listUsers(filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.search) params.set('search', filters.search);
+  if (filters.role && filters.role !== 'all') params.set('role', filters.role);
+  if (filters.status && filters.status !== 'all') params.set('status', filters.status);
+  params.set('_', String(Date.now()));
+
+  const response = await fetch(`${API_BASE}/api/users?${params.toString()}`, { cache: 'no-store' });
   await handleAuthRedirect(response);
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to load users.');
   return data.users;
+}
+
+export async function getUserStats() {
+  const response = await fetch(`${API_BASE}/api/users/stats?_=${Date.now()}`, { cache: 'no-store' });
+  await handleAuthRedirect(response);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to load user stats.');
+  return data.stats;
 }
 
 export async function createUser(username, password, role) {

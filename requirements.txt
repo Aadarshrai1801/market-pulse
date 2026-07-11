@@ -1,3 +1,29 @@
-flask
-playwright
-openpyxl
+# --- Web framework & auth ---
+flask>=3.0
+werkzeug>=3.0
+requests>=2.31          # used by auth.py for Google OAuth token/userinfo calls
+
+# --- Data / spreadsheet storage ---
+openpyxl>=3.1
+
+# --- Scraper ---
+# Pinned exactly (not >=) to match the Dockerfile's base image tag
+# (mcr.microsoft.com/playwright/python:v1.44.0-jammy). If you bump one,
+# bump the other - a mismatch is the most common cause of "browser not
+# found" errors at deploy time.
+playwright==1.44.0
+
+# --- OCR endpoint (/api/ocr) ---
+opencv-python-headless>=4.9   # headless build - no GUI deps needed on a server
+numpy>=1.26
+
+# --- Production server ---
+gunicorn>=22.0           # run with: gunicorn -w 2 -b 0.0.0.0:$PORT app:app
+                          # (Windows/dev alternative: waitress)
+
+# --- NOTE ---
+# app.py imports `preprocess_image`, `run_ocr`, `extract_table`, `extract_text`,
+# `group_rows`, `detect_header_columns` from a local `ocr/ocr.py` module that
+# wasn't included in the files you uploaded. If that module itself imports an
+# OCR engine (e.g. pytesseract, easyocr, paddleocr/paddlepaddle), add that
+# package here too - otherwise the app will fail to start on a fresh install.

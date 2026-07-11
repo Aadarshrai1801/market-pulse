@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+.git/
+.env
+secret.key
+users.db
+products.xlsx
+uploads/

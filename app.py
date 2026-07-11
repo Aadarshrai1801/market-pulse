@@ -4,12 +4,11 @@ import threading
 import uuid
 from datetime import datetime, timedelta
 import werkzeug
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 import cv2
 import numpy as np
 
-from ocr.ocr import preprocess_image, run_ocr, extract_table, extract_text, group_rows, detect_header_columns
-from flask import Flask, request, jsonify, render_template
+from ocr.ocr import preprocess_image, run_ocr, extract_table
 from openpyxl import load_workbook
 
 from scraper import (
@@ -23,15 +22,27 @@ from auth import auth_bp, init_auth, login_required, role_required
 
 app = Flask(__name__)
 
+# All persistent data (users.db via USERS_DB_PATH, the uploads folder,
+# products.xlsx, and the cached secret.key fallback below) lives under
+# DATA_DIR. Point this at your host's mounted volume in production (e.g.
+# DATA_DIR=/app/data on Railway) - anything written outside a mounted
+# volume is lost on the next redeploy/restart.
+DATA_DIR = os.environ.get("DATA_DIR", ".")
+os.makedirs(DATA_DIR, exist_ok=True)
 
-def _load_or_create_secret_key(path="secret.key"):
+
+def _load_or_create_secret_key(path=None):
     """
     Flask needs a stable secret_key to sign session cookies - if it changes
     on every restart, everyone gets logged out each time the server
-    restarts. SECRET_KEY env var wins if set (recommended for production);
-    otherwise a random key is generated once and cached in `path` so it
-    survives restarts on this machine.
+    restarts. SECRET_KEY env var wins if set (**strongly recommended for
+    production** - on most hosts the local filesystem doesn't persist
+    across deploys, so the file-cache fallback below would silently
+    regenerate on every deploy and log everyone out); otherwise a random
+    key is generated once and cached in `path` so it survives restarts on
+    this machine.
     """
+    path = path or os.path.join(DATA_DIR, "secret.key")
     env_key = os.environ.get("SECRET_KEY")
     if env_key:
         return env_key
@@ -47,16 +58,26 @@ def _load_or_create_secret_key(path="secret.key"):
 app.secret_key = _load_or_create_secret_key()
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
+# Cookie only sent over HTTPS, and not attached to cross-site requests.
+# Both assume the app is served over HTTPS in production (true on
+# Railway/Render and behind any real reverse proxy) - if you're ever
+# testing production config over plain HTTP, SESSION_COOKIE_SECURE will
+# silently stop the session cookie from being set at all.
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "1") == "1"
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+# Reject uploads over 10MB before they're fully buffered/decoded - guards
+# the /api/ocr endpoint against memory exhaustion from oversized images.
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
 init_auth(app)          # creates users.db + seeds a default admin if empty
 app.register_blueprint(auth_bp)
 
-UPLOAD_FOLDER = "uploads"
+UPLOAD_FOLDER = os.path.join(DATA_DIR, "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 RETAILERS = list(SITE_SEARCH_CONFIG.keys())
-EXCEL_PATH = "products.xlsx"
+EXCEL_PATH = os.path.join(DATA_DIR, "products.xlsx")
 
 # In-memory job store for the async fetch API - fine for single-device use
 # (resets if the app restarts, which is expected here).
@@ -518,26 +539,16 @@ def api_ocr_scan():
 
         # 2. Temporary storage setup because preprocess_image expects a path string
         # (Alternatively, you can modify preprocess_image to accept the image matrix directly)
-        temp_path = "temp_upload_ocr.png"
+        # A unique filename per request - a fixed name here meant two people
+        # uploading at the same moment would overwrite each other's file and
+        # could get OCR results from the wrong image.
+        temp_path = os.path.join(UPLOAD_FOLDER, f"ocr_{uuid.uuid4().hex}.png")
         cv2.imwrite(temp_path, img)
 
         # 3. Fire the custom PP-OCRv5 pipeline steps
         processed_matrix = preprocess_image(temp_path)
         ocr_tokens = run_ocr(processed_matrix, confidence_threshold=0.60)
-
-        # --- DEBUG: temporary diagnostics, remove once the pipeline is confirmed working ---
-        print("=" * 60)
-        print(f"[OCR DEBUG] Raw tokens detected: {len(ocr_tokens)}")
-        print("[OCR DEBUG] Raw extracted text:")
-        print(extract_text(ocr_tokens))
-        rows = group_rows(ocr_tokens)
-        print(f"[OCR DEBUG] Rows grouped: {len(rows)}")
-        columns = detect_header_columns(rows)
-        print(f"[OCR DEBUG] Header columns detected ({len(columns)}/6): {list(columns.keys())}")
         structured_rows = extract_table(ocr_tokens)
-        print(f"[OCR DEBUG] Structured rows returned by extract_table: {len(structured_rows)}")
-        print("=" * 60)
-        # --- END DEBUG ---
 
         # 4. Cleanup temp disk usage
         if os.path.exists(temp_path):
@@ -566,15 +577,25 @@ def api_ocr_scan():
             "products": payload_products
         })
 
-    except Exception as e:
+    except Exception:
+        # Full detail goes to the server log only - returning str(e) to the
+        # client can leak internal paths/config, and isn't actionable for
+        # whoever's on the other end of the upload anyway.
+        app.logger.exception("OCR scan failed")
+        try:
+            if 'temp_path' in locals() and os.path.exists(temp_path): #type: ignore
+                os.remove(temp_path) #type: ignore
+        except OSError:
+            pass
         return jsonify({
             "ok": False,
-            "error": f"Internal Core Module Failure: {str(e)}"
+            "error": "OCR processing failed. Please try again with a clearer image."
         }), 500
 
 
 if __name__ == "__main__":
-    # host="127.0.0.1" -> only reachable from this device, never from your
-    # network or the internet. threaded=True so a GET /api/jobs/<id> poll
-    # can be answered while a background fetch job is still running.
-    app.run(host="127.0.0.1", port=5000, debug=True, threaded=True)
+    # Dev-only entrypoint. In production this file is imported by gunicorn
+    # (see Dockerfile: `gunicorn -w 1 -b 0.0.0.0:$PORT app:app`), so this
+    # block never runs on the server - debug=True here is safe precisely
+    # because it's local-only.
+    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", 5000)), debug=True, threaded=True)

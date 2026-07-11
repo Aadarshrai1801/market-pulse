@@ -5,7 +5,7 @@ import {
 import {
   loadMeta, createJob, pollJob, loadHistory as loadHistoryApi, mapHistoryResponse, mapScrapeResult, ocrScan,
   getCurrentUser, logout, updateOwnProfile, listUsers, createUser, updateUserRole, setUserActive,
-  resetUserPassword, deleteUser,
+  resetUserPassword, deleteUser, getUserStats,
 } from './api.js';
 import { renderProductTags, renderProductSelect, renderPresets, addProduct, resetProducts, removeProduct } from './products.js';
 import { renderVariationCharts } from './charts.js';
@@ -71,7 +71,9 @@ function applyRoleGating(user) {
   const isAdmin = user.role === 'admin';
 
   const userMgmtItem = document.getElementById('menuUserManagement');
+  const adminSectionLabel = document.getElementById('menuAdminSectionLabel');
   if (userMgmtItem) userMgmtItem.style.display = isAdmin ? '' : 'none';
+  if (adminSectionLabel) adminSectionLabel.style.display = isAdmin ? '' : 'none';
 
   ['fetchBtn', 'syncBtn'].forEach((id) => {
     const el = document.getElementById(id);
@@ -91,14 +93,40 @@ function applyRoleGating(user) {
 function renderUserBadge(user) {
   const menuBtn = document.getElementById('userMenuBtn');
   const nameEl = document.getElementById('userBadgeName');
-  const roleEl = document.getElementById('userBadgeRole');
   const avatarEl = document.getElementById('userAvatar');
+  const avatarLgEl = document.getElementById('userAvatarLg');
+  const headerNameEl = document.getElementById('userMenuName');
+  const roleDotEl = document.getElementById('userMenuRoleDot');
+  const roleTextEl = document.getElementById('userMenuRoleText');
+  const metaEl = document.getElementById('userMenuMeta');
   if (!menuBtn) return;
 
   nameEl.textContent = user.username;
-  roleEl.textContent = user.role;
-  roleEl.className = `role-chip role-${user.role}`;
-  avatarEl.textContent = (user.username || '?').trim().slice(0, 2).toUpperCase();
+  if (headerNameEl) headerNameEl.textContent = user.username;
+  if (roleDotEl) roleDotEl.className = `role-dot role-dot-${user.role}`;
+  if (roleTextEl) roleTextEl.textContent = `${roleLabel(user.role)} access`;
+
+  const initials = (user.username || '?').trim().slice(0, 2).toUpperCase();
+  [avatarEl, avatarLgEl].forEach((el) => {
+    if (!el) return;
+    if (user.avatar_url) {
+      el.textContent = '';
+      el.style.backgroundImage = `url("${user.avatar_url}")`;
+      el.classList.add('has-image');
+    } else {
+      el.textContent = initials;
+      el.style.backgroundImage = '';
+      el.classList.remove('has-image');
+    }
+  });
+
+  if (metaEl) {
+    const parts = [];
+    if (user.auth_provider === 'google') parts.push('Signed in with Google');
+    if (user.created_at) parts.push(`Member since ${formatJoinedDate(user.created_at)}`);
+    metaEl.textContent = parts.join(' · ');
+  }
+
   menuBtn.style.display = '';
 }
 
@@ -141,6 +169,17 @@ function bindUserMenu() {
     const status = document.getElementById('adminStatus');
     if (status) status.style.display = 'none';
     collapseAddUserPanel();
+
+    userFilterState.search = '';
+    userFilterState.role = 'all';
+    userFilterState.status = 'all';
+    const searchInput = document.getElementById('userSearchInput');
+    const roleFilter = document.getElementById('userRoleFilter');
+    const statusFilter = document.getElementById('userStatusFilter');
+    if (searchInput) searchInput.value = '';
+    if (roleFilter) roleFilter.value = 'all';
+    if (statusFilter) statusFilter.value = 'all';
+
     openModal('userMgmtOverlay');
     refreshUsersList();
   });
@@ -190,6 +229,8 @@ function bindUserMenu() {
 
   document.getElementById('btnAddUser')?.addEventListener('click', handleAddUser);
   document.getElementById('cpSubmit')?.addEventListener('click', handleChangePassword);
+
+  bindUserFilters();
 }
 
 /* ---- User Management modal: list, add, edit, revoke ---- */
@@ -204,6 +245,23 @@ function formatJoinedDate(createdAt) {
   return match ? `${match[3]}/${match[2]}/${match[1]}` : '—';
 }
 
+// Relative "time ago" for the last-login line, e.g. "3h ago", "5d ago".
+// Falls back to the plain date once it's more than a month old.
+function formatLastLogin(lastLoginAt) {
+  if (!lastLoginAt) return 'Never signed in';
+  const then = new Date(lastLoginAt.replace(' ', 'T'));
+  if (Number.isNaN(then.getTime())) return 'Never signed in';
+  const diffMs = Date.now() - then.getTime();
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return 'Active just now';
+  if (minutes < 60) return `Active ${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Active ${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `Active ${days}d ago`;
+  return `Last seen ${formatJoinedDate(lastLoginAt)}`;
+}
+
 function renderUsersList(users) {
   const wrap = document.getElementById('usersBody');
   if (!wrap) return;
@@ -212,12 +270,26 @@ function renderUsersList(users) {
     return;
   }
 
-  wrap.innerHTML = users.map((u) => `
+  wrap.innerHTML = users.map((u) => {
+    const isGoogle = u.auth_provider === 'google';
+    const initials = (u.username || '?').trim().slice(0, 2).toUpperCase();
+    const avatarHtml = u.avatar_url
+      ? `<span class="user-card-avatar has-image" style="background-image:url('${escapeHtml(u.avatar_url)}')"></span>`
+      : `<span class="user-card-avatar">${escapeHtml(initials)}</span>`;
+    const providerBadge = isGoogle
+      ? '<span class="provider-badge provider-google">G Google</span>'
+      : '<span class="provider-badge">🔒 Password</span>';
+
+    return `
     <div class="user-card ${u.is_active ? '' : 'inactive'}" data-user-id="${u.id}">
       <div class="user-card-top">
         <div class="user-card-id">
-          <div class="user-card-name">${escapeHtml(u.username)}</div>
-          <div class="user-card-username">${u.is_active ? '@' + escapeHtml(u.username) : 'Deactivated'}</div>
+          ${avatarHtml}
+          <div>
+            <div class="user-card-name">${escapeHtml(u.username)} ${providerBadge}</div>
+            <div class="user-card-username">${u.is_active ? '@' + escapeHtml(u.username) : 'Deactivated'}</div>
+            <div class="user-card-last-login">${escapeHtml(formatLastLogin(u.last_login_at))}</div>
+          </div>
         </div>
         <span class="role-chip role-${u.role}">${roleLabel(u.role).toUpperCase()}</span>
       </div>
@@ -233,13 +305,14 @@ function renderUsersList(users) {
         <div class="user-card-joined">joined ${formatJoinedDate(u.created_at)}</div>
       </div>
       <div class="user-card-secondary">
-        <button type="button" class="user-card-link" data-action="reset-password" data-id="${u.id}">Change Password</button>
+        <button type="button" class="user-card-link" data-action="reset-password" data-id="${u.id}">${isGoogle ? 'Set Password' : 'Change Password'}</button>
         <button type="button" class="user-card-link" data-action="toggle-active" data-id="${u.id}" data-active="${u.is_active ? '1' : '0'}" ${u.id === currentUser?.id ? 'disabled title="You can\'t deactivate your own account"' : ''}>
           ${u.is_active ? 'Deactivate' : 'Activate'}
         </button>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   wrap.querySelectorAll('[data-action="role"]').forEach((select) => {
     select.addEventListener('change', async (event) => {
@@ -300,15 +373,67 @@ function renderUsersList(users) {
   });
 }
 
+const userFilterState = { search: '', role: 'all', status: 'all' };
+let userFilterDebounce = null;
+
+function renderUserStats(stats) {
+  const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+  setText('statTotal', stats.total);
+  setText('statActive', stats.active);
+  setText('statInactive', stats.inactive);
+  setText('statAdmins', stats.admins);
+  setText('statEditors', stats.editors);
+  setText('statViewers', stats.viewers);
+}
+
+async function refreshUserStats() {
+  try {
+    const stats = await getUserStats();
+    renderUserStats(stats);
+  } catch {
+    // Non-critical — the account list itself still loads and works fine
+    // without the stats bar, so fail silently here.
+  }
+}
+
 async function refreshUsersList() {
   const wrap = document.getElementById('usersBody');
   if (wrap) wrap.innerHTML = '<div class="empty-state">Loading users…</div>';
+  refreshUserStats();
   try {
-    const users = await listUsers();
+    const users = await listUsers(userFilterState);
+    if (!users.length && (userFilterState.search || userFilterState.role !== 'all' || userFilterState.status !== 'all')) {
+      if (wrap) wrap.innerHTML = '<div class="um-empty-filtered">No accounts match these filters.</div>';
+      return;
+    }
     renderUsersList(users);
   } catch (error) {
     if (wrap) wrap.innerHTML = `<div class="empty-state">Unable to load users: ${escapeHtml(error.message)}</div>`;
   }
+}
+
+function bindUserFilters() {
+  const searchInput = document.getElementById('userSearchInput');
+  const roleFilter = document.getElementById('userRoleFilter');
+  const statusFilter = document.getElementById('userStatusFilter');
+
+  searchInput?.addEventListener('input', (event) => {
+    clearTimeout(userFilterDebounce);
+    userFilterDebounce = setTimeout(() => {
+      userFilterState.search = event.target.value.trim();
+      refreshUsersList();
+    }, 250);
+  });
+
+  roleFilter?.addEventListener('change', (event) => {
+    userFilterState.role = event.target.value;
+    refreshUsersList();
+  });
+
+  statusFilter?.addEventListener('change', (event) => {
+    userFilterState.status = event.target.value;
+    refreshUsersList();
+  });
 }
 
 async function handleAddUser() {

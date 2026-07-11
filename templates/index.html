@@ -52,17 +52,30 @@
         <button class="dd-btn user-menu-btn" id="userMenuBtn" type="button" style="display:none;">
           <span class="user-menu-id">
             <span class="user-avatar" id="userAvatar">—</span>
-            <span class="user-menu-text">
-              <span id="userBadgeName">—</span>
-              <span class="role-chip" id="userBadgeRole">—</span>
-            </span>
+            <span class="user-menu-text" id="userBadgeName">—</span>
           </span>
           <span class="chev">▾</span>
         </button>
         <div class="dd-panel user-menu-panel" id="userMenuPanel">
+          <div class="user-menu-header">
+            <span class="user-avatar user-avatar-lg" id="userAvatarLg">—</span>
+            <div class="user-menu-header-text">
+              <div class="user-menu-header-name" id="userMenuName">—</div>
+              <div class="user-menu-header-role">
+                <span class="role-dot" id="userMenuRoleDot"></span>
+                <span id="userMenuRoleText">—</span>
+              </div>
+              <div class="user-menu-header-meta" id="userMenuMeta"></div>
+            </div>
+          </div>
+
+          <div class="dd-section-label" id="menuAdminSectionLabel" style="display:none;">Administration</div>
           <div class="dd-item" id="menuUserManagement" style="display:none;"><span>🛡</span><span>User Management</span>
           </div>
-          <div class="dd-item" id="menuChangePassword"><span>👤</span><span>Account Settings</span></div>
+
+          <div class="dd-section-label">Account</div>
+          <div class="dd-item" id="menuChangePassword"><span>🔑</span><span>Account &amp; Password</span></div>
+
           <div class="dd-divider"></div>
           <div class="dd-item dd-item-danger" id="menuSignOut"><span>⏻</span><span>Sign Out</span></div>
         </div>
@@ -734,6 +747,48 @@
         <button class="modal-close" id="closeUserMgmt" type="button">✕</button>
       </div>
       <div class="modal-body">
+        <div class="um-stats-grid" id="userStatsGrid">
+          <div class="um-stat accent-admin">
+            <div class="um-stat-value" id="statTotal">—</div>
+            <div class="um-stat-label">Total</div>
+          </div>
+          <div class="um-stat accent-editor">
+            <div class="um-stat-value" id="statActive">—</div>
+            <div class="um-stat-label">Active</div>
+          </div>
+          <div class="um-stat accent-inactive">
+            <div class="um-stat-value" id="statInactive">—</div>
+            <div class="um-stat-label">Deactivated</div>
+          </div>
+          <div class="um-stat accent-admin">
+            <div class="um-stat-value" id="statAdmins">—</div>
+            <div class="um-stat-label">Admins</div>
+          </div>
+          <div class="um-stat accent-editor">
+            <div class="um-stat-value" id="statEditors">—</div>
+            <div class="um-stat-label">Editors</div>
+          </div>
+          <div class="um-stat accent-viewer">
+            <div class="um-stat-value" id="statViewers">—</div>
+            <div class="um-stat-label">Viewers</div>
+          </div>
+        </div>
+
+        <div class="um-filters">
+          <input class="um-search-input" id="userSearchInput" type="text" placeholder="Search by username…">
+          <select class="um-filter-select" id="userRoleFilter">
+            <option value="all">All roles</option>
+            <option value="admin">Admin</option>
+            <option value="editor">Editor</option>
+            <option value="viewer">Viewer</option>
+          </select>
+          <select class="um-filter-select" id="userStatusFilter">
+            <option value="all">All statuses</option>
+            <option value="active">Active</option>
+            <option value="inactive">Deactivated</option>
+          </select>
+        </div>
+
         <div class="add-user-toggle-row">
           <div class="section-label">Accounts</div>
           <button class="add-user-toggle" id="toggleAddUser" type="button" aria-expanded="false">

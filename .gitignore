@@ -1,0 +1,16 @@
+# Secrets & local data - never commit these
+.env
+secret.key
+users.db
+products.xlsx
+uploads/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# OS/editor cruft
+.DS_Store
+.vscode/
