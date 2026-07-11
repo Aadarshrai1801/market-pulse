@@ -4,11 +4,11 @@ import {
 } from './utils.js';
 import {
   loadMeta, createJob, pollJob, loadHistory as loadHistoryApi, mapHistoryResponse, mapScrapeResult, ocrScan,
-  getCurrentUser, logout,
+  getCurrentUser, logout, updateOwnProfile, listUsers, createUser, updateUserRole, setUserActive,
+  resetUserPassword, deleteUser,
 } from './api.js';
 import { renderProductTags, renderProductSelect, renderPresets, addProduct, resetProducts, removeProduct } from './products.js';
 import { renderVariationCharts } from './charts.js';
-import { initAdminTab } from './admin.js';
 
 let currentUser = null; // { id, username, role } — set once during init()
 
@@ -49,18 +49,14 @@ function savePersistedDetail(rows) {
 /* ============================== TABS ============================== */
 
 function bindTabs() {
-  let adminTabInitialized = false;
   document.querySelectorAll('.tab-btn').forEach((button) => {
     button.addEventListener('click', () => {
       document.querySelectorAll('.tab-btn').forEach((tab) => tab.classList.toggle('active', tab === button));
       document.querySelectorAll('.tab-panel').forEach((panel) => panel.classList.remove('active'));
       const id = button.getAttribute('data-tab');
       document.getElementById(`tab-${id}`)?.classList.add('active');
-      if (id === 'variation') renderVariationTab();
-      if (id === 'admin' && !adminTabInitialized && currentUser) {
-        adminTabInitialized = true;
-        initAdminTab(currentUser.id);
-      }
+      if (id === 'variation') { renderVariationTab(); renderAnalyticsTab(); }
+      if (id === 'scheduler') renderSchedulerUI();
     });
   });
 }
@@ -74,7 +70,8 @@ function applyRoleGating(user) {
   const isViewer = user.role === 'viewer';
   const isAdmin = user.role === 'admin';
 
-  document.getElementById('adminTabBtn').style.display = isAdmin ? '' : 'none';
+  const userMgmtItem = document.getElementById('menuUserManagement');
+  if (userMgmtItem) userMgmtItem.style.display = isAdmin ? '' : 'none';
 
   ['fetchBtn', 'syncBtn'].forEach((id) => {
     const el = document.getElementById(id);
@@ -92,27 +89,331 @@ function applyRoleGating(user) {
 }
 
 function renderUserBadge(user) {
-  const badge = document.getElementById('userBadge');
+  const menuBtn = document.getElementById('userMenuBtn');
   const nameEl = document.getElementById('userBadgeName');
   const roleEl = document.getElementById('userBadgeRole');
-  const logoutBtn = document.getElementById('logoutBtn');
-  if (!badge) return;
+  const avatarEl = document.getElementById('userAvatar');
+  if (!menuBtn) return;
 
   nameEl.textContent = user.username;
   roleEl.textContent = user.role;
   roleEl.className = `role-chip role-${user.role}`;
-  badge.style.display = '';
-  logoutBtn.style.display = '';
+  avatarEl.textContent = (user.username || '?').trim().slice(0, 2).toUpperCase();
+  menuBtn.style.display = '';
 }
 
-function bindLogout() {
-  document.getElementById('logoutBtn')?.addEventListener('click', async () => {
+/* ---- user menu dropdown + the two modals it opens ---- */
+
+function toggleUserMenu() {
+  const panel = document.getElementById('userMenuPanel');
+  const btn = document.getElementById('userMenuBtn');
+  const isOpen = panel.classList.contains('open');
+  closeAllDropdowns();
+  if (!isOpen) { panel.classList.add('open'); btn.classList.add('open'); }
+}
+
+function openModal(id) {
+  document.getElementById(id)?.classList.add('open');
+}
+
+function closeModal(id) {
+  document.getElementById(id)?.classList.remove('open');
+}
+
+function collapseAddUserPanel() {
+  const panel = document.getElementById('addUserPanel');
+  const toggle = document.getElementById('toggleAddUser');
+  panel?.classList.remove('open');
+  if (toggle) {
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.innerHTML = '<span class="add-user-toggle-icon">+</span> Add User';
+  }
+}
+
+function bindUserMenu() {
+  document.getElementById('userMenuBtn')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    toggleUserMenu();
+  });
+
+  document.getElementById('menuUserManagement')?.addEventListener('click', () => {
+    closeAllDropdowns();
+    const status = document.getElementById('adminStatus');
+    if (status) status.style.display = 'none';
+    collapseAddUserPanel();
+    openModal('userMgmtOverlay');
+    refreshUsersList();
+  });
+
+  document.getElementById('toggleAddUser')?.addEventListener('click', () => {
+    const panel = document.getElementById('addUserPanel');
+    const toggle = document.getElementById('toggleAddUser');
+    if (!panel || !toggle) return;
+    const willOpen = !panel.classList.contains('open');
+    panel.classList.toggle('open', willOpen);
+    toggle.setAttribute('aria-expanded', String(willOpen));
+    toggle.innerHTML = willOpen
+      ? '<span class="add-user-toggle-icon">+</span> Cancel'
+      : '<span class="add-user-toggle-icon">+</span> Add User';
+    if (willOpen) document.getElementById('newUserName')?.focus();
+  });
+
+  document.getElementById('menuChangePassword')?.addEventListener('click', () => {
+    closeAllDropdowns();
+    resetChangePasswordForm();
+    openModal('changePwOverlay');
+  });
+
+  document.getElementById('cpUsername')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') handleChangePassword();
+  });
+
+  document.getElementById('menuSignOut')?.addEventListener('click', async () => {
+    closeAllDropdowns();
     try {
       await logout();
     } finally {
       window.location.href = '/login';
     }
   });
+
+  document.getElementById('closeUserMgmt')?.addEventListener('click', () => closeModal('userMgmtOverlay'));
+  document.getElementById('closeChangePw')?.addEventListener('click', () => closeModal('changePwOverlay'));
+
+  // click on the dimmed backdrop (not the card itself) closes the modal
+  document.getElementById('userMgmtOverlay')?.addEventListener('click', (event) => {
+    if (event.target.id === 'userMgmtOverlay') closeModal('userMgmtOverlay');
+  });
+  document.getElementById('changePwOverlay')?.addEventListener('click', (event) => {
+    if (event.target.id === 'changePwOverlay') closeModal('changePwOverlay');
+  });
+
+  document.getElementById('btnAddUser')?.addEventListener('click', handleAddUser);
+  document.getElementById('cpSubmit')?.addEventListener('click', handleChangePassword);
+}
+
+/* ---- User Management modal: list, add, edit, revoke ---- */
+
+function roleLabel(role) {
+  return role === 'admin' ? 'Admin' : role === 'editor' ? 'Editor' : 'Viewer';
+}
+
+function formatJoinedDate(createdAt) {
+  const datePart = (createdAt || '').slice(0, 10); // "YYYY-MM-DD"
+  const match = datePart.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : '—';
+}
+
+function renderUsersList(users) {
+  const wrap = document.getElementById('usersBody');
+  if (!wrap) return;
+  if (!users.length) {
+    wrap.innerHTML = '<div class="empty-state">No accounts yet</div>';
+    return;
+  }
+
+  wrap.innerHTML = users.map((u) => `
+    <div class="user-card ${u.is_active ? '' : 'inactive'}" data-user-id="${u.id}">
+      <div class="user-card-top">
+        <div class="user-card-id">
+          <div class="user-card-name">${escapeHtml(u.username)}</div>
+          <div class="user-card-username">${u.is_active ? '@' + escapeHtml(u.username) : 'Deactivated'}</div>
+        </div>
+        <span class="role-chip role-${u.role}">${roleLabel(u.role).toUpperCase()}</span>
+      </div>
+      <div class="user-card-bottom">
+        <div class="user-card-controls">
+          <select class="role-select" data-action="role" data-id="${u.id}" ${u.id === currentUser?.id ? 'disabled title="You can\'t change your own role"' : ''}>
+            <option value="viewer" ${u.role === 'viewer' ? 'selected' : ''}>viewer</option>
+            <option value="editor" ${u.role === 'editor' ? 'selected' : ''}>editor</option>
+            <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>admin</option>
+          </select>
+          <button type="button" class="user-card-btn danger" data-action="delete" data-id="${u.id}" ${u.id === currentUser?.id ? 'disabled title="You can\'t delete your own account"' : ''}>Revoke</button>
+        </div>
+        <div class="user-card-joined">joined ${formatJoinedDate(u.created_at)}</div>
+      </div>
+      <div class="user-card-secondary">
+        <button type="button" class="user-card-link" data-action="reset-password" data-id="${u.id}">Change Password</button>
+        <button type="button" class="user-card-link" data-action="toggle-active" data-id="${u.id}" data-active="${u.is_active ? '1' : '0'}" ${u.id === currentUser?.id ? 'disabled title="You can\'t deactivate your own account"' : ''}>
+          ${u.is_active ? 'Deactivate' : 'Activate'}
+        </button>
+      </div>
+    </div>
+  `).join('');
+
+  wrap.querySelectorAll('[data-action="role"]').forEach((select) => {
+    select.addEventListener('change', async (event) => {
+      const id = Number(event.target.dataset.id);
+      try {
+        await updateUserRole(id, event.target.value);
+        setStatus('✓ Role updated', 'ok');
+        refreshUsersList();
+      } catch (error) {
+        setStatus(`✗ ${error.message}`, 'err');
+        refreshUsersList();
+      }
+    });
+  });
+
+  wrap.querySelectorAll('[data-action="toggle-active"]').forEach((button) => {
+    button.addEventListener('click', async (event) => {
+      const id = Number(event.currentTarget.dataset.id);
+      const nextActive = event.currentTarget.dataset.active !== '1';
+      try {
+        await setUserActive(id, nextActive);
+        setStatus(nextActive ? '✓ Account activated' : '✓ Account deactivated', 'ok');
+        refreshUsersList();
+      } catch (error) {
+        setStatus(`✗ ${error.message}`, 'err');
+      }
+    });
+  });
+
+  wrap.querySelectorAll('[data-action="reset-password"]').forEach((button) => {
+    button.addEventListener('click', async (event) => {
+      const id = Number(event.currentTarget.dataset.id);
+      const newPassword = window.prompt('Enter a new password for this account (min. 6 characters):');
+      if (newPassword === null) return;
+      try {
+        await resetUserPassword(id, newPassword);
+        setStatus('✓ Password reset', 'ok');
+      } catch (error) {
+        setStatus(`✗ ${error.message}`, 'err');
+      }
+    });
+  });
+
+  wrap.querySelectorAll('[data-action="delete"]').forEach((button) => {
+    button.addEventListener('click', async (event) => {
+      const id = Number(event.currentTarget.dataset.id);
+      const card = event.currentTarget.closest('.user-card');
+      const username = card?.querySelector('.user-card-name')?.textContent || 'this user';
+      if (!window.confirm(`Revoke access for "${username}"? This permanently deletes the account.`)) return;
+      try {
+        await deleteUser(id);
+        setStatus('✓ User deleted', 'ok');
+        refreshUsersList();
+      } catch (error) {
+        setStatus(`✗ ${error.message}`, 'err');
+      }
+    });
+  });
+}
+
+async function refreshUsersList() {
+  const wrap = document.getElementById('usersBody');
+  if (wrap) wrap.innerHTML = '<div class="empty-state">Loading users…</div>';
+  try {
+    const users = await listUsers();
+    renderUsersList(users);
+  } catch (error) {
+    if (wrap) wrap.innerHTML = `<div class="empty-state">Unable to load users: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function handleAddUser() {
+  const nameEl = document.getElementById('newUserName');
+  const passEl = document.getElementById('newUserPassword');
+  const roleEl = document.getElementById('newUserRole');
+  const status = document.getElementById('adminStatus');
+
+  const showStatus = (message, type) => {
+    if (!status) return;
+    status.style.display = 'block';
+    status.className = `status-line ${type === 'err' ? 'error' : 'ok'}`;
+    status.textContent = message;
+  };
+
+  const username = nameEl.value.trim();
+  const password = passEl.value;
+  const role = roleEl.value;
+
+  if (!username || !password) {
+    showStatus('Enter a username and password.', 'err');
+    return;
+  }
+
+  try {
+    await createUser(username, password, role);
+    showStatus(`✓ Created account "${username}"`, 'ok');
+    nameEl.value = '';
+    passEl.value = '';
+    roleEl.value = 'viewer';
+    refreshUsersList();
+    setTimeout(collapseAddUserPanel, 900);
+  } catch (error) {
+    showStatus(`✗ ${error.message}`, 'err');
+  }
+}
+
+/* ---- Account Settings modal (username + password) ---- */
+
+function resetChangePasswordForm() {
+  ['cpCurrent', 'cpNew', 'cpConfirm'].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const usernameEl = document.getElementById('cpUsername');
+  if (usernameEl) usernameEl.value = currentUser?.username || '';
+  const status = document.getElementById('cpStatus');
+  if (status) status.style.display = 'none';
+}
+
+async function handleChangePassword() {
+  const usernameEl = document.getElementById('cpUsername');
+  const newUsername = (usernameEl?.value || '').trim();
+  const current = document.getElementById('cpCurrent').value;
+  const next = document.getElementById('cpNew').value;
+  const confirm = document.getElementById('cpConfirm').value;
+  const status = document.getElementById('cpStatus');
+  const submitBtn = document.getElementById('cpSubmit');
+
+  const showStatus = (message, type) => {
+    if (!status) return;
+    status.style.display = 'block';
+    status.className = `status-line ${type === 'err' ? 'error' : 'ok'}`;
+    status.textContent = message;
+  };
+
+  const usernameChanged = newUsername && newUsername !== currentUser?.username;
+  const wantsPasswordChange = next || confirm;
+
+  if (!current) {
+    showStatus('Enter your current password to save changes.', 'err');
+    return;
+  }
+  if (!usernameChanged && !wantsPasswordChange) {
+    showStatus('Nothing to update.', 'err');
+    return;
+  }
+  if (usernameChanged && newUsername.length < 1) {
+    showStatus('Username can\'t be empty.', 'err');
+    return;
+  }
+  if (wantsPasswordChange) {
+    if (next.length < 6) {
+      showStatus('New password must be at least 6 characters.', 'err');
+      return;
+    }
+    if (next !== confirm) {
+      showStatus('New password and confirmation don\'t match.', 'err');
+      return;
+    }
+  }
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Saving…';
+  try {
+    const updatedUser = await updateOwnProfile(current, usernameChanged ? newUsername : null, wantsPasswordChange ? next : null);
+    if (updatedUser) {
+      currentUser = updatedUser;
+      renderUserBadge(updatedUser);
+    }
+    showStatus('✓ Account updated', 'ok');
+    setTimeout(() => closeModal('changePwOverlay'), 900);
+  } catch (error) {
+    showStatus(`✗ ${error.message}`, 'err');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Save Changes';
+  }
 }
 
 // Confirms there's a valid session before wiring up the rest of the app.
@@ -160,15 +461,16 @@ function updateTicker(flatRows) {
    we just confirm the Flask backend (running your scraper.py) is reachable. */
 
 async function checkBackend(showToast = false) {
-  const pill = document.getElementById('sourcePill');
-  if (pill) { pill.textContent = 'checking…'; pill.className = 'source-pill'; }
+  const pill = document.getElementById('backendPill');
+  const label = document.getElementById('backendPillText');
+  if (pill && label) { pill.className = 'live-pill checking'; label.textContent = 'checking'; }
   try {
     await loadMeta();
-    if (pill) { pill.textContent = '● connected'; pill.className = 'source-pill ok'; }
+    if (pill && label) { pill.className = 'live-pill'; label.textContent = 'LIVE'; }
     if (showToast) setStatus('✓ Python backend reachable', 'ok');
     return true;
   } catch (error) {
-    if (pill) { pill.textContent = '● unreachable'; pill.className = 'source-pill err'; }
+    if (pill && label) { pill.className = 'live-pill err'; label.textContent = 'OFFLINE'; }
     if (showToast) setStatus(`✗ ${error.message}`, 'err');
     return false;
   }
@@ -698,6 +1000,7 @@ function bindProductsTab() {
 function refreshProductDependents() {
   renderProductTags();
   renderProductSelect();
+  renderBasketBuilder();
   renderPresets();
   document.getElementById('sProducts').textContent = appState.products.length || '—';
 }
@@ -716,11 +1019,34 @@ function populateVariationSelects() {
   renderProductSelect(); // fills #varProduct too
 }
 
+function updateVariationStats(data30, dates, retailers, products) {
+  document.getElementById('vRetailers').textContent = retailers.length || '—';
+  document.getElementById('vProducts').textContent = products.length || '—';
+  document.getElementById('vDates').textContent = dates.length || '—';
+  document.getElementById('vPoints').textContent = data30.length || '—';
+  const prices = data30.map((r) => r.price).filter((p) => p > 0);
+  document.getElementById('vAvg').textContent = prices.length ? (prices.reduce((a, b) => a + b, 0) / prices.length).toFixed(2) : '—';
+}
+
 function renderVariationTab() {
   const retailerValue = document.getElementById('varRetailer')?.value || 'all';
   const productValue = document.getElementById('varProduct')?.value || 'all';
-  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 30);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const rangeValue = document.getElementById('varRange')?.value || '30';
+
+  // Anchor the range window to the most recent date we actually have data
+  // for, not to the real-world "today" - otherwise stale/older fetch history
+  // silently disappears from this tab even though appState.allData still has it.
+  const latestDate = appState.allData.reduce((latest, row) => (row.date > latest ? row.date : latest), '');
+  let cutoffStr = '0000-00-00';
+  if (rangeValue !== 'all') {
+    const cutoff = latestDate ? new Date(`${latestDate}T00:00:00`) : new Date();
+    cutoff.setDate(cutoff.getDate() - Number(rangeValue));
+    cutoffStr = cutoff.toISOString().slice(0, 10);
+  }
+
+  const rangeLabel = rangeValue === 'all' ? 'All time' : `Last ${rangeValue} days`;
+  const subEl = document.getElementById('varSub');
+  if (subEl) subEl.textContent = rangeLabel;
 
   const data30 = appState.allData.filter((row) =>
     row.date >= cutoffStr &&
@@ -728,15 +1054,18 @@ function renderVariationTab() {
     (productValue === 'all' || normalizeProductId(row.product) === normalizeProductId(productValue)));
 
   const grid = document.getElementById('varChartsGrid');
-  const tableCard = document.getElementById('varTableCard');
+  const focusPanel = document.getElementById('varFocusPanel');
 
   if (!data30.length) {
     grid.innerHTML = '<div class="empty-state">No variation data yet — fetch some prices first.</div>';
-    tableCard.style.display = 'none';
+    focusPanel.style.display = 'none';
+    document.getElementById('insightLeaderboard').innerHTML = '';
+    document.getElementById('insightMovers').innerHTML = '';
     document.getElementById('vs-up').textContent = '0';
     document.getElementById('vs-down').textContent = '0';
     document.getElementById('vs-flat').textContent = '0';
     document.getElementById('vs-dates').textContent = '0';
+    updateVariationStats([], [], [], []);
     return;
   }
 
@@ -746,41 +1075,679 @@ function renderVariationTab() {
   const lookup = {};
   data30.forEach((row) => { lookup[`${row.date}|${normalizeRetailerId(row.retailer)}|${normalizeProductId(row.product)}`] = row; });
 
-  renderVariationCharts(data30, dates, retailers, products, lookup);
-  buildVariationTable(dates, retailers, products, lookup);
-  tableCard.style.display = 'block';
+  updateVariationStats(data30, dates, retailers, products);
+  try {
+    renderVariationCharts(data30, dates, retailers, products, lookup);
+  } catch (error) {
+    console.error('[MarketPulse] renderVariationCharts failed, continuing with tables:', error);
+  }
+  renderMarketInsights(dates, retailers, products, lookup);
+  bindVariationCsvExport(dates, retailers, products, lookup);
+
+  // "Check a specific product across specific supermarkets": once the person
+  // narrows to a single product, show a focused per-retailer comparison.
+  if (productValue !== 'all' && products.length === 1) {
+    renderProductFocus(products[0], dates, retailers, lookup);
+    focusPanel.style.display = 'block';
+  } else {
+    focusPanel.style.display = 'none';
+  }
 }
 
-function buildVariationTable(dates, retailers, products, lookup) {
-  const body = document.getElementById('varTableBody');
-  if (!body) return;
+// Compares one product's price across every supermarket currently in view,
+// sorted cheapest-first, with the best (lowest latest) price called out.
+function renderProductFocus(productId, dates, retailers, lookup) {
+  const meta = getProductMeta(productId);
+  const titleEl = document.getElementById('varFocusTitle');
+  const subEl = document.getElementById('varFocusSub');
+  if (titleEl) titleEl.textContent = `${meta.emoji || '🛒'} ${meta.name || productId} — Price by Supermarket`;
+  if (subEl) subEl.textContent = `${retailers.length} retailer${retailers.length !== 1 ? 's' : ''} · ${dates[0]} → ${dates[dates.length - 1]}`;
+
   const latestDate = dates[dates.length - 1];
   const previousDate = dates.length > 1 ? dates[dates.length - 2] : null;
-  const rows = [];
-  products.forEach((productId) => {
-    retailers.forEach((retailerId) => {
-      const latest = lookup[`${latestDate}|${normalizeRetailerId(retailerId)}|${normalizeProductId(productId)}`];
-      const previous = previousDate ? lookup[`${previousDate}|${normalizeRetailerId(retailerId)}|${normalizeProductId(productId)}`] : null;
-      const prices = dates.map((date) => {
-        const row = lookup[`${date}|${normalizeRetailerId(retailerId)}|${normalizeProductId(productId)}`];
-        return row && row.price ? row.price.toFixed(2) : '';
-      });
-      let change = '';
-      if (latest?.price && previous?.price) {
-        const pct = ((latest.price - previous.price) / previous.price) * 100;
-        change = `${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`;
-      }
-      rows.push([productId, retailerId, normalizeCountryName(latest?.origin_country) || '', ...prices, change]);
-    });
-  });
-  const header = ['Product', 'Retailer', 'Origin Country', ...dates, 'Change %'];
-  body.innerHTML = '<table class="vtbl"><thead><tr>' + header.map((c) => `<th>${escapeHtml(c)}</th>`).join('') + '</tr></thead><tbody>' +
-    rows.map((row) => `<tr>${row.map((c) => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('') + '</tbody></table>';
 
-  document.getElementById('btnExportVariation').onclick = () => {
+  const rows = retailers.map((retailerId) => {
+    const latest = lookup[`${latestDate}|${normalizeRetailerId(retailerId)}|${normalizeProductId(productId)}`];
+    const previous = previousDate ? lookup[`${previousDate}|${normalizeRetailerId(retailerId)}|${normalizeProductId(productId)}`] : null;
+    const seriesPrices = dates
+      .map((date) => lookup[`${date}|${normalizeRetailerId(retailerId)}|${normalizeProductId(productId)}`]?.price)
+      .filter((p) => p > 0);
+    const min = seriesPrices.length ? Math.min(...seriesPrices) : null;
+    const max = seriesPrices.length ? Math.max(...seriesPrices) : null;
+    let changePct = null;
+    if (latest?.price && previous?.price) {
+      changePct = ((latest.price - previous.price) / previous.price) * 100;
+    }
+    return {
+      retailerId,
+      latestPrice: latest?.price || null,
+      changePct,
+      min,
+      max,
+      origin: latest?.origin_country ? getFullCountryName(latest.origin_country) : '—',
+    };
+  }).filter((row) => row.latestPrice !== null);
+
+  rows.sort((a, b) => a.latestPrice - b.latestPrice);
+  const bestPrice = rows.length ? rows[0].latestPrice : null;
+
+  const body = document.getElementById('varFocusBody');
+  if (!body) return;
+
+  if (!rows.length) {
+    body.innerHTML = '<div class="empty-state">No prices for this product in the selected range.</div>';
+    return;
+  }
+
+  const header = ['Supermarket', 'Latest Price', 'Change vs Prev.', 'Min (range)', 'Max (range)', 'Origin'];
+  body.innerHTML = `<table class="focus-tbl"><thead><tr>${header.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>` +
+    rows.map((row) => {
+      const isBest = row.latestPrice === bestPrice;
+      const changeClass = row.changePct === null ? 'focus-change-flat' : row.changePct > 0.5 ? 'focus-change-up' : row.changePct < -0.5 ? 'focus-change-down' : 'focus-change-flat';
+      const changeText = row.changePct === null ? '—' : `${row.changePct > 0 ? '+' : ''}${row.changePct.toFixed(2)}%`;
+      return `<tr class="${isBest ? 'best-row' : ''}">
+        <td>${createRetailerPill(row.retailerId)}</td>
+        <td><span class="focus-price">AED ${row.latestPrice.toFixed(2)}</span>${isBest ? '<span class="best-badge">🏆 Best Price</span>' : ''}</td>
+        <td class="${changeClass}">${changeText}</td>
+        <td>AED ${row.min !== null ? row.min.toFixed(2) : '—'}</td>
+        <td>AED ${row.max !== null ? row.max.toFixed(2) : '—'}</td>
+        <td>${escapeHtml(row.origin)}</td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
+}
+
+// "Best Value Retailers": for every product, find whichever retailer had the
+// lowest latest price, and tally up how often each retailer wins. Answers
+// "which supermarket is generally cheapest?" at a glance.
+function renderInsightLeaderboard(dates, retailers, products, lookup) {
+  const container = document.getElementById('insightLeaderboard');
+  if (!container) return;
+  const latestDate = dates[dates.length - 1];
+
+  const wins = {};
+  retailers.forEach((r) => { wins[r] = 0; });
+
+  products.forEach((productId) => {
+    const priced = retailers
+      .map((retailerId) => ({ retailerId, row: lookup[`${latestDate}|${normalizeRetailerId(retailerId)}|${normalizeProductId(productId)}`] }))
+      .filter((entry) => entry.row && entry.row.price > 0);
+    if (!priced.length) return;
+    const minPrice = Math.min(...priced.map((entry) => entry.row.price));
+    priced.filter((entry) => entry.row.price === minPrice).forEach((entry) => { wins[entry.retailerId] += 1; });
+  });
+
+  const ranked = Object.entries(wins).sort((a, b) => b[1] - a[1]);
+  const medals = ['🥇', '🥈', '🥉'];
+
+  if (!ranked.length || ranked.every(([, count]) => count === 0)) {
+    container.innerHTML = '<div class="empty-state">Not enough overlapping prices yet.</div>';
+    return;
+  }
+
+  container.innerHTML = ranked.map(([retailerId, count], index) => `
+    <div class="insight-row">
+      <div class="insight-left">
+        <span class="insight-rank">${medals[index] || index + 1}</span>
+        ${createRetailerPill(retailerId)}
+      </div>
+      <span class="insight-count">${count} product${count !== 1 ? 's' : ''} cheapest</span>
+    </div>`).join('');
+}
+
+// "Biggest Movers": average each product's price across retailers on the
+// latest vs. previous date, rank by % change, and surface the top gainers
+// and fallers. Answers "what actually changed since last time?"
+function renderInsightMovers(dates, retailers, products, lookup) {
+  const container = document.getElementById('insightMovers');
+  if (!container) return;
+
+  if (dates.length < 2) {
+    container.innerHTML = '<div class="empty-state">Need at least 2 fetch dates to compare.</div>';
+    return;
+  }
+
+  const latestDate = dates[dates.length - 1];
+  const previousDate = dates[dates.length - 2];
+
+  const movers = products.map((productId) => {
+    const latestPrices = retailers.map((r) => lookup[`${latestDate}|${normalizeRetailerId(r)}|${normalizeProductId(productId)}`]).filter((row) => row && row.price > 0).map((row) => row.price);
+    const prevPrices = retailers.map((r) => lookup[`${previousDate}|${normalizeRetailerId(r)}|${normalizeProductId(productId)}`]).filter((row) => row && row.price > 0).map((row) => row.price);
+    if (!latestPrices.length || !prevPrices.length) return null;
+    const latestAvg = latestPrices.reduce((a, b) => a + b, 0) / latestPrices.length;
+    const prevAvg = prevPrices.reduce((a, b) => a + b, 0) / prevPrices.length;
+    if (!prevAvg) return null;
+    const pct = ((latestAvg - prevAvg) / prevAvg) * 100;
+    return { productId, pct };
+  }).filter(Boolean);
+
+  if (!movers.length) {
+    container.innerHTML = '<div class="empty-state">No comparable prices between the last two dates.</div>';
+    return;
+  }
+
+  movers.sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct));
+  const top = movers.slice(0, 5);
+
+  container.innerHTML = top.map((mover) => {
+    const meta = getProductMeta(mover.productId);
+    const changeClass = mover.pct > 0.5 ? 'focus-change-up' : mover.pct < -0.5 ? 'focus-change-down' : 'focus-change-flat';
+    const arrow = mover.pct > 0.5 ? '▲' : mover.pct < -0.5 ? '▼' : '●';
+    return `
+      <div class="insight-row">
+        <div class="insight-left">
+          <span class="insight-name">${escapeHtml(meta.emoji || '🛒')} ${escapeHtml(meta.name || mover.productId)}</span>
+        </div>
+        <span class="insight-mover-pct ${changeClass}">${arrow} ${mover.pct > 0 ? '+' : ''}${mover.pct.toFixed(1)}%</span>
+      </div>`;
+  }).join('');
+}
+
+function renderMarketInsights(dates, retailers, products, lookup) {
+  renderInsightLeaderboard(dates, retailers, products, lookup);
+  renderInsightMovers(dates, retailers, products, lookup);
+}
+
+// Builds the same product x retailer x date grid as before for CSV export,
+// without rendering a visible table for it.
+function bindVariationCsvExport(dates, retailers, products, lookup) {
+  const button = document.getElementById('btnExportVariation');
+  if (!button) return;
+  button.onclick = () => {
+    const latestDate = dates[dates.length - 1];
+    const previousDate = dates.length > 1 ? dates[dates.length - 2] : null;
+    const rows = [];
+    products.forEach((productId) => {
+      retailers.forEach((retailerId) => {
+        const latest = lookup[`${latestDate}|${normalizeRetailerId(retailerId)}|${normalizeProductId(productId)}`];
+        const previous = previousDate ? lookup[`${previousDate}|${normalizeRetailerId(retailerId)}|${normalizeProductId(productId)}`] : null;
+        const prices = dates.map((date) => {
+          const row = lookup[`${date}|${normalizeRetailerId(retailerId)}|${normalizeProductId(productId)}`];
+          return row && row.price ? row.price.toFixed(2) : '';
+        });
+        let change = '';
+        if (latest?.price && previous?.price) {
+          const pct = ((latest.price - previous.price) / previous.price) * 100;
+          change = `${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`;
+        }
+        rows.push([productId, retailerId, normalizeCountryName(latest?.origin_country) || '', ...prices, change]);
+      });
+    });
+    const header = ['Product', 'Retailer', 'Origin Country', ...dates, 'Change %'];
     const csv = toCsv(header, rows);
     downloadCsv('price-variation.csv', csv);
   };
+}
+
+/* ============================== ANALYTICS TAB ============================== */
+// Decision-support analytics for analytical/procurement users: statistical
+// volatility, retailer pricing behaviour, outlier detection, trend/forecast,
+// and a basket-cost comparator. All derived client-side from appState.allData
+// (the same flat rows the Price Variation tab uses), so no backend changes.
+
+const basketQty = {}; // productId -> quantity in kg, persisted only in-memory for this session
+
+function mean(arr) { return arr.reduce((a, b) => a + b, 0) / arr.length; }
+
+function median(arr) {
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+// Sample standard deviation (n-1 denominator) - fine down to n=2, returns 0 below that.
+function stddev(arr, avg) {
+  if (arr.length < 2) return 0;
+  const variance = arr.reduce((a, b) => a + (b - avg) ** 2, 0) / (arr.length - 1);
+  return Math.sqrt(variance);
+}
+
+// Same "anchor to latest known date, not real-world today" window logic used
+// by the Price Variation tab, applied independently here for the Analytics tab.
+function getAnalyticsRows(rangeValue) {
+  const latestDate = appState.allData.reduce((latest, row) => (row.date > latest ? row.date : latest), '');
+  let cutoffStr = '0000-00-00';
+  if (rangeValue !== 'all') {
+    const cutoff = latestDate ? new Date(`${latestDate}T00:00:00`) : new Date();
+    cutoff.setDate(cutoff.getDate() - Number(rangeValue));
+    cutoffStr = cutoff.toISOString().slice(0, 10);
+  }
+  return appState.allData.filter((row) => row.date >= cutoffStr);
+}
+
+// Per-product statistical summary across every retailer/date in view, ranked
+// by coefficient of variation (CV = stddev/mean) - the standard way to compare
+// volatility across products that sit at very different price levels.
+function computeProductStats(rows) {
+  const byProduct = new Map();
+  rows.forEach((row) => {
+    if (row.price <= 0) return;
+    const key = normalizeProductId(row.product);
+    if (!byProduct.has(key)) byProduct.set(key, { productId: row.product, prices: [] });
+    byProduct.get(key).prices.push(row.price);
+  });
+  return [...byProduct.values()].map(({ productId, prices }) => {
+    const avg = mean(prices);
+    const sd = stddev(prices, avg);
+    const cv = avg ? (sd / avg) * 100 : 0;
+    return {
+      productId, count: prices.length, min: Math.min(...prices), max: Math.max(...prices),
+      mean: avg, median: median(prices), std: sd, cv,
+    };
+  }).sort((a, b) => b.cv - a.cv);
+}
+
+function volatilityBadge(cv) {
+  if (cv < 10) return '<span class="ana-badge ana-badge-low">Low</span>';
+  if (cv < 25) return '<span class="ana-badge ana-badge-med">Medium</span>';
+  return '<span class="ana-badge ana-badge-high">High</span>';
+}
+
+function renderProductStatsTable(stats) {
+  const body = document.getElementById('statsTableBody');
+  if (!body) return;
+  if (!stats.length) {
+    body.innerHTML = '<div class="empty-state">No priced data yet — fetch some prices first.</div>';
+    return;
+  }
+  const header = ['Product', 'Samples', 'Min', 'Max', 'Mean', 'Median', 'Std Dev', 'CV %', 'Volatility'];
+  body.innerHTML = `<table class="focus-tbl"><thead><tr>${header.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>` +
+    stats.map((row) => {
+      const meta = getProductMeta(row.productId);
+      return `<tr>
+        <td>${escapeHtml(meta.emoji || '🛒')} ${escapeHtml(meta.name || row.productId)}</td>
+        <td>${row.count}</td>
+        <td>AED ${row.min.toFixed(2)}</td>
+        <td>AED ${row.max.toFixed(2)}</td>
+        <td>AED ${row.mean.toFixed(2)}</td>
+        <td>AED ${row.median.toFixed(2)}</td>
+        <td>${row.std.toFixed(2)}</td>
+        <td>${row.cv.toFixed(1)}%</td>
+        <td>${volatilityBadge(row.cv)}</td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
+}
+
+// For every date+product where 2+ retailers reported a price, measure how far
+// each retailer's price sat from that day's market average, then average
+// those deviations per retailer. Negative = generally cheaper than market,
+// positive = generally pricier ("premium" positioning).
+function computeRetailerPositioning(rows) {
+  const groups = new Map();
+  rows.forEach((row) => {
+    if (row.price <= 0) return;
+    const key = `${row.date}|${normalizeProductId(row.product)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  });
+
+  const deviations = {}; // normalized retailer id -> { label, values: [] }
+  groups.forEach((entries) => {
+    if (entries.length < 2) return; // need at least 2 retailers to define a "market" price
+    const avg = mean(entries.map((e) => e.price));
+    if (!avg) return;
+    entries.forEach((e) => {
+      const key = normalizeRetailerId(e.retailer);
+      if (!deviations[key]) deviations[key] = { retailerId: e.retailer, values: [] };
+      deviations[key].values.push(((e.price - avg) / avg) * 100);
+    });
+  });
+
+  return Object.values(deviations)
+    .map((d) => ({ retailerId: d.retailerId, avgDeviation: mean(d.values), samples: d.values.length }))
+    .sort((a, b) => a.avgDeviation - b.avgDeviation);
+}
+
+function renderRetailerPositioning(positioning) {
+  const container = document.getElementById('retailerPositioningBody');
+  if (!container) return;
+  if (!positioning.length) {
+    container.innerHTML = '<div class="empty-state">Need 2+ retailers priced on the same day to compare.</div>';
+    return;
+  }
+  container.innerHTML = positioning.map((p) => {
+    const isDiscount = p.avgDeviation < -0.5;
+    const isPremium = p.avgDeviation > 0.5;
+    const label = isDiscount ? 'Discount' : isPremium ? 'Premium' : 'Market avg';
+    const cls = isDiscount ? 'focus-change-down' : isPremium ? 'focus-change-up' : 'focus-change-flat';
+    return `
+      <div class="insight-row">
+        <div class="insight-left">
+          ${createRetailerPill(p.retailerId)}
+          <span class="ana-metric-note">${p.samples} samples</span>
+        </div>
+        <span class="${cls}">${label} · ${p.avgDeviation > 0 ? '+' : ''}${p.avgDeviation.toFixed(1)}%</span>
+      </div>`;
+  }).join('');
+}
+
+// Per retailer+product time series, flag any point whose z-score (distance
+// from that series' own mean, in standard deviations) is 2 or more - a quick,
+// distribution-free way to surface pricing errors or genuine spikes.
+function detectAnomalies(rows) {
+  const series = new Map();
+  rows.forEach((row) => {
+    if (row.price <= 0) return;
+    const key = `${normalizeRetailerId(row.retailer)}|${normalizeProductId(row.product)}`;
+    if (!series.has(key)) series.set(key, []);
+    series.get(key).push(row);
+  });
+
+  const anomalies = [];
+  series.forEach((entries) => {
+    if (entries.length < 4) return; // too few points for a meaningful z-score
+    const prices = entries.map((e) => e.price);
+    const avg = mean(prices);
+    const sd = stddev(prices, avg);
+    if (!sd) return;
+    entries.forEach((e) => {
+      const z = (e.price - avg) / sd;
+      if (Math.abs(z) >= 2) anomalies.push({ ...e, z, avg });
+    });
+  });
+
+  return anomalies.sort((a, b) => Math.abs(b.z) - Math.abs(a.z)).slice(0, 8);
+}
+
+function renderAnomalies(anomalies) {
+  const container = document.getElementById('anomalyBody');
+  if (!container) return;
+  if (!anomalies.length) {
+    container.innerHTML = '<div class="empty-state">No statistical outliers in this range.</div>';
+    return;
+  }
+  container.innerHTML = anomalies.map((a) => {
+    const meta = getProductMeta(a.product);
+    const up = a.price > a.avg;
+    return `
+      <div class="insight-row">
+        <div class="insight-left">
+          <span class="insight-name">${escapeHtml(meta.emoji || '🛒')} ${escapeHtml(meta.name || a.product)}</span>
+          <span class="ana-metric-note">${createRetailerPill(a.retailer)} · ${escapeHtml(a.date)}</span>
+        </div>
+        <span class="${up ? 'focus-change-up' : 'focus-change-down'}">AED ${a.price.toFixed(2)} (z=${a.z.toFixed(1)})</span>
+      </div>`;
+  }).join('');
+}
+
+// Simple ordinary-least-squares linear regression of each product's daily
+// average price (across retailers) against day index, giving a slope
+// (AED/day), an R^2 fit quality, and a naive one-step-ahead forecast.
+function computeProductTrends(rows, dates) {
+  const productIds = [...new Set(rows.map((r) => r.product))];
+  return productIds.map((productId) => {
+    const points = dates.map((date, idx) => {
+      const dayPrices = rows
+        .filter((r) => r.date === date && normalizeProductId(r.product) === normalizeProductId(productId) && r.price > 0)
+        .map((r) => r.price);
+      return dayPrices.length ? { x: idx, y: mean(dayPrices) } : null;
+    }).filter(Boolean);
+
+    if (points.length < 2) return null;
+
+    const n = points.length;
+    const sumX = points.reduce((a, p) => a + p.x, 0);
+    const sumY = points.reduce((a, p) => a + p.y, 0);
+    const sumXY = points.reduce((a, p) => a + p.x * p.y, 0);
+    const sumX2 = points.reduce((a, p) => a + p.x * p.x, 0);
+    const denom = n * sumX2 - sumX * sumX;
+    const slope = denom ? (n * sumXY - sumX * sumY) / denom : 0;
+    const intercept = (sumY - slope * sumX) / n;
+
+    const meanY = sumY / n;
+    const ssTot = points.reduce((a, p) => a + (p.y - meanY) ** 2, 0);
+    const ssRes = points.reduce((a, p) => a + (p.y - (slope * p.x + intercept)) ** 2, 0);
+    const r2 = ssTot ? Math.max(0, 1 - ssRes / ssTot) : 0;
+
+    const lastX = points[points.length - 1].x;
+    return { productId, slope, r2, current: points[points.length - 1].y, forecast: slope * (lastX + 1) + intercept };
+  }).filter(Boolean).sort((a, b) => Math.abs(b.slope) - Math.abs(a.slope));
+}
+
+function renderTrends(trends) {
+  const body = document.getElementById('trendTableBody');
+  if (!body) return;
+  if (!trends.length) {
+    body.innerHTML = '<div class="empty-state">Need at least 2 fetch dates to compute a trend.</div>';
+    return;
+  }
+  const header = ['Product', 'Trend', 'Slope (AED/day)', 'Fit (R²)', 'Current Avg', 'Forecast Next'];
+  body.innerHTML = `<table class="focus-tbl"><thead><tr>${header.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>` +
+    trends.map((t) => {
+      const meta = getProductMeta(t.productId);
+      const dir = t.slope > 0.01 ? 'up' : t.slope < -0.01 ? 'down' : 'flat';
+      const arrow = dir === 'up' ? '▲ Rising' : dir === 'down' ? '▼ Falling' : '● Stable';
+      return `<tr>
+        <td>${escapeHtml(meta.emoji || '🛒')} ${escapeHtml(meta.name || t.productId)}</td>
+        <td class="ana-forecast-${dir}">${arrow}</td>
+        <td>${t.slope > 0 ? '+' : ''}${t.slope.toFixed(3)}</td>
+        <td>${t.r2.toFixed(2)}</td>
+        <td>AED ${t.current.toFixed(2)}</td>
+        <td>AED ${Math.max(0, t.forecast).toFixed(2)}</td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
+}
+
+// Builds (or rebuilds) the editable quantity grid from the currently
+// configured products. Called on init and whenever the product list changes.
+function renderBasketBuilder() {
+  const wrap = document.getElementById('basketQtyGrid');
+  if (!wrap) return;
+  wrap.innerHTML = appState.products.map((p) => {
+    const val = basketQty[p.id] ?? 1;
+    basketQty[p.id] = val;
+    return `<div class="basket-qty-item">
+      <span class="basket-qty-label">${escapeHtml(p.emoji || '🛒')} ${escapeHtml(p.name || p.id)}</span>
+      <input type="number" min="0" step="0.5" class="text-input basket-qty-input" data-product="${escapeHtml(p.id)}" value="${val}">
+    </div>`;
+  }).join('');
+  wrap.querySelectorAll('.basket-qty-input').forEach((input) => {
+    input.addEventListener('input', () => {
+      basketQty[input.dataset.product] = Number(input.value) || 0;
+      renderBasketResults();
+    });
+  });
+}
+
+// Prices out the current basket (qty x latest price) at every retailer that
+// has coverage for at least one basket item, ranked cheapest-first - the
+// direct "where should I actually shop" answer.
+function renderBasketResults() {
+  const body = document.getElementById('basketResultsBody');
+  if (!body) return;
+
+  const rangeValue = document.getElementById('anaRange')?.value || '30';
+  const rows = getAnalyticsRows(rangeValue);
+  if (!rows.length) {
+    body.innerHTML = '<div class="empty-state">No price data yet — fetch some prices first.</div>';
+    return;
+  }
+
+  const latestDate = rows.reduce((latest, row) => (row.date > latest ? row.date : latest), '');
+  const retailers = [...new Set(rows.map((r) => r.retailer))];
+
+  const results = retailers.map((retailerId) => {
+    let total = 0, covered = 0;
+    const missing = [];
+    appState.products.forEach((p) => {
+      const qty = basketQty[p.id] || 0;
+      if (!qty) return;
+      const match = rows.find((r) =>
+        r.date === latestDate &&
+        normalizeRetailerId(r.retailer) === normalizeRetailerId(retailerId) &&
+        normalizeProductId(r.product) === normalizeProductId(p.id) &&
+        r.price > 0);
+      if (match) { total += qty * match.price; covered += 1; } else missing.push(p.name || p.id);
+    });
+    return { retailerId, total, covered, missing };
+  }).filter((r) => r.covered > 0).sort((a, b) => a.total - b.total);
+
+  if (!results.length) {
+    body.innerHTML = '<div class="empty-state">Set a quantity above for at least one product to compare baskets.</div>';
+    return;
+  }
+
+  const cheapest = results[0].total;
+  const header = ['Supermarket', 'Basket Total', 'vs Cheapest', 'Items Priced'];
+  body.innerHTML = `<table class="focus-tbl"><thead><tr>${header.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>` +
+    results.map((r) => {
+      const diff = r.total - cheapest;
+      const isBest = diff <= 0.01;
+      const diffText = isBest ? '—' : `+AED ${diff.toFixed(2)}`;
+      const missingNote = r.missing.length
+        ? ` <span class="ana-metric-note" title="Missing: ${escapeHtml(r.missing.join(', '))}">⚠ ${r.missing.length} missing</span>` : '';
+      return `<tr class="${isBest ? 'best-row' : ''}">
+        <td>${createRetailerPill(r.retailerId)}</td>
+        <td><span class="focus-price">AED ${r.total.toFixed(2)}</span>${isBest ? '<span class="best-badge">🏆 Cheapest</span>' : ''}</td>
+        <td class="${isBest ? 'focus-change-down' : 'focus-change-flat'}">${diffText}</td>
+        <td>${r.covered}/${appState.products.length}${missingNote}</td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
+}
+
+// For each product, groups observed prices by origin country and finds the
+// cheapest vs priciest sourcing origin, plus the % spread between them - a
+// direct "which origin should we buy from" signal for procurement.
+function computeOriginAnalysis(rows) {
+  const byProduct = new Map();
+  rows.forEach((row) => {
+    if (row.price <= 0 || !row.origin_country || row.origin_country === '—') return;
+    const key = normalizeProductId(row.product);
+    if (!byProduct.has(key)) byProduct.set(key, { productId: row.product, byOrigin: new Map() });
+    const entry = byProduct.get(key);
+    if (!entry.byOrigin.has(row.origin_country)) entry.byOrigin.set(row.origin_country, []);
+    entry.byOrigin.get(row.origin_country).push(row.price);
+  });
+
+  return [...byProduct.values()].map(({ productId, byOrigin }) => {
+    const origins = [...byOrigin.entries()]
+      .map(([origin, prices]) => ({ origin, avg: mean(prices), count: prices.length }))
+      .sort((a, b) => a.avg - b.avg);
+    if (!origins.length) return null;
+    const cheapest = origins[0];
+    const priciest = origins[origins.length - 1];
+    const spread = origins.length > 1 && cheapest.avg ? ((priciest.avg - cheapest.avg) / cheapest.avg) * 100 : 0;
+    return { productId, origins, cheapest, priciest, spread };
+  }).filter(Boolean).sort((a, b) => b.spread - a.spread);
+}
+
+function renderOriginAnalysis(analysis) {
+  const body = document.getElementById('originTableBody');
+  if (!body) return;
+  if (!analysis.length) {
+    body.innerHTML = '<div class="empty-state">No origin-country data in this range yet.</div>';
+    return;
+  }
+  const header = ['Product', 'Origins Seen', 'Cheapest Origin', 'Priciest Origin', 'Price Spread'];
+  body.innerHTML = `<table class="focus-tbl"><thead><tr>${header.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>` +
+    analysis.map((a) => {
+      const meta = getProductMeta(a.productId);
+      const single = a.origins.length === 1;
+      return `<tr>
+        <td>${escapeHtml(meta.emoji || '🛒')} ${escapeHtml(meta.name || a.productId)}</td>
+        <td>${a.origins.length}</td>
+        <td><span class="focus-change-down">${escapeHtml(a.cheapest.origin)}</span> · AED ${a.cheapest.avg.toFixed(2)}</td>
+        <td>${single ? '—' : `<span class="focus-change-up">${escapeHtml(a.priciest.origin)}</span> · AED ${a.priciest.avg.toFixed(2)}`}</td>
+        <td>${single ? '—' : `${a.spread.toFixed(1)}%`}</td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
+}
+
+// Pearson correlation coefficient between two equal-length numeric series.
+function pearsonCorrelation(xs, ys) {
+  const n = xs.length;
+  const mx = mean(xs), my = mean(ys);
+  let num = 0, dx2 = 0, dy2 = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx, dy = ys[i] - my;
+    num += dx * dy; dx2 += dx * dx; dy2 += dy * dy;
+  }
+  const denom = Math.sqrt(dx2 * dy2);
+  return denom ? num / denom : 0;
+}
+
+// For every pair of retailers, correlates their prices on the (date, product)
+// points they both reported. High positive r = prices move together (shared
+// supplier / tacit coordination); near zero or negative = independent or
+// inverse pricing - useful context when deciding who to negotiate with.
+function computeRetailerCorrelations(rows) {
+  const byRetailer = new Map();
+  rows.forEach((row) => {
+    if (row.price <= 0) return;
+    const rid = normalizeRetailerId(row.retailer);
+    if (!byRetailer.has(rid)) byRetailer.set(rid, { retailerId: row.retailer, prices: new Map() });
+    byRetailer.get(rid).prices.set(`${row.date}|${normalizeProductId(row.product)}`, row.price);
+  });
+
+  const retailers = [...byRetailer.values()];
+  const pairs = [];
+  for (let i = 0; i < retailers.length; i++) {
+    for (let j = i + 1; j < retailers.length; j++) {
+      const a = retailers[i], b = retailers[j];
+      const commonKeys = [...a.prices.keys()].filter((k) => b.prices.has(k));
+      if (commonKeys.length < 4) continue; // too few shared points for a meaningful r
+      const xs = commonKeys.map((k) => a.prices.get(k));
+      const ys = commonKeys.map((k) => b.prices.get(k));
+      pairs.push({ a: a.retailerId, b: b.retailerId, r: pearsonCorrelation(xs, ys), samples: commonKeys.length });
+    }
+  }
+  return pairs.sort((x, y) => Math.abs(y.r) - Math.abs(x.r));
+}
+
+function correlationLabel(r) {
+  if (r >= 0.7) return { text: 'Moves together', cls: 'focus-change-up' };
+  if (r <= -0.5) return { text: 'Inverse pricing', cls: 'focus-change-down' };
+  if (Math.abs(r) < 0.3) return { text: 'Independent', cls: 'focus-change-flat' };
+  return { text: 'Weak link', cls: 'focus-change-flat' };
+}
+
+function renderRetailerCorrelations(pairs) {
+  const body = document.getElementById('correlationTableBody');
+  if (!body) return;
+  if (!pairs.length) {
+    body.innerHTML = '<div class="empty-state">Need 2+ retailers with 4+ shared product/date prices to correlate.</div>';
+    return;
+  }
+  const header = ['Retailer Pair', 'Correlation (r)', 'Reading', 'Shared Prices'];
+  body.innerHTML = `<table class="focus-tbl"><thead><tr>${header.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>` +
+    pairs.map((p) => {
+      const label = correlationLabel(p.r);
+      return `<tr>
+        <td>${createRetailerPill(p.a)} <span class="ana-metric-note">vs</span> ${createRetailerPill(p.b)}</td>
+        <td>${p.r.toFixed(2)}</td>
+        <td class="${label.cls}">${label.text}</td>
+        <td>${p.samples}</td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
+}
+
+function renderAnalyticsTab() {
+  const rangeValue = document.getElementById('anaRange')?.value || '30';
+  const rangeLabel = rangeValue === 'all' ? 'All time' : `Last ${rangeValue} days`;
+  const subEl = document.getElementById('anaSub');
+  if (subEl) subEl.textContent = rangeLabel;
+
+  const rows = getAnalyticsRows(rangeValue);
+
+  if (!rows.length) {
+    renderProductStatsTable([]);
+    renderRetailerPositioning([]);
+    renderAnomalies([]);
+    renderTrends([]);
+    renderOriginAnalysis([]);
+    renderRetailerCorrelations([]);
+    renderBasketResults();
+    return;
+  }
+
+  const dates = [...new Set(rows.map((r) => r.date))].sort();
+
+  renderProductStatsTable(computeProductStats(rows));
+  renderRetailerPositioning(computeRetailerPositioning(rows));
+  renderAnomalies(detectAnomalies(rows));
+  renderTrends(computeProductTrends(rows, dates));
+  renderOriginAnalysis(computeOriginAnalysis(rows));
+  renderRetailerCorrelations(computeRetailerCorrelations(rows));
+  renderBasketResults();
 }
 
 /* ============================== IMPORT IMAGES / OCR TAB ============================== */
@@ -1064,12 +2031,194 @@ function bindOCR() {
   });
 }
 
+/* ============================== SCHEDULER TAB ============================== */
+// Client-side automatic fetch scheduler. There's no backend cron wired up, so
+// this runs entirely via a JS timer in this browser tab: it can be
+// backgrounded, but closing the tab/browser pauses it. Config and run history
+// live in localStorage so they survive a page reload.
+
+const SCHED_CONFIG_KEY = 'marketpulse_scheduler_config_v1';
+const SCHED_LOG_KEY = 'marketpulse_scheduler_log_v1';
+const SCHED_TICK_MS = 1000;
+let schedTickHandle = null;
+
+function loadSchedConfig() {
+  const defaults = { enabled: false, frequency: 'daily', time: '09:00', intervalHours: 6, lastRun: null };
+  try {
+    const raw = localStorage.getItem(SCHED_CONFIG_KEY);
+    return raw ? { ...defaults, ...JSON.parse(raw) } : defaults;
+  } catch {
+    return defaults;
+  }
+}
+
+function saveSchedConfig(config) {
+  try { localStorage.setItem(SCHED_CONFIG_KEY, JSON.stringify(config)); }
+  catch (error) { console.warn('[MarketPulse] Could not persist scheduler config:', error); }
+}
+
+function loadSchedLog() {
+  try { return JSON.parse(localStorage.getItem(SCHED_LOG_KEY) || '[]'); } catch { return []; }
+}
+
+function pushSchedLog(entry) {
+  const log = loadSchedLog();
+  log.unshift(entry);
+  try { localStorage.setItem(SCHED_LOG_KEY, JSON.stringify(log.slice(0, 25))); }
+  catch (error) { console.warn('[MarketPulse] Could not persist scheduler log:', error); }
+}
+
+// Daily mode: next occurrence of the chosen time (today if still ahead, else
+// tomorrow). Interval mode: lastRun + N hours (or "now" if it's never run).
+function computeNextRun(config) {
+  const now = new Date();
+  if (config.frequency === 'interval') {
+    const intervalMs = Math.max(1, Number(config.intervalHours) || 6) * 3600 * 1000;
+    if (!config.lastRun) return now;
+    return new Date(new Date(config.lastRun).getTime() + intervalMs);
+  }
+  const [hh, mm] = (config.time || '09:00').split(':').map(Number);
+  const next = new Date(now);
+  next.setHours(hh || 0, mm || 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  return next;
+}
+
+function formatSchedDateTime(value) {
+  if (!value) return '—';
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function renderSchedLog() {
+  const body = document.getElementById('schedLogBody');
+  if (!body) return;
+  const log = loadSchedLog();
+  if (!log.length) {
+    body.innerHTML = '<div class="empty-state">No runs yet. Enable the schedule, or hit "Run Now" to try one immediately.</div>';
+    return;
+  }
+  const header = ['When', 'Trigger', 'Result'];
+  body.innerHTML = `<table class="focus-tbl"><thead><tr>${header.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>` +
+    log.map((entry) => `<tr>
+      <td>${escapeHtml(formatSchedDateTime(entry.time))}</td>
+      <td>${escapeHtml(entry.trigger === 'manual' ? 'Manual (Run Now)' : 'Scheduled')}</td>
+      <td class="${entry.ok ? 'sched-log-ok' : 'sched-log-err'}">${escapeHtml(entry.message || (entry.ok ? 'Success' : 'Failed'))}</td>
+    </tr>`).join('') + '</tbody></table>';
+}
+
+function renderSchedulerUI() {
+  const config = loadSchedConfig();
+
+  const enabledEl = document.getElementById('schedEnabled');
+  const labelEl = document.getElementById('schedToggleLabel');
+  const freqEl = document.getElementById('schedFrequency');
+  const timeEl = document.getElementById('schedTime');
+  const intervalEl = document.getElementById('schedInterval');
+  const timeField = document.getElementById('schedTimeField');
+  const intervalField = document.getElementById('schedIntervalField');
+  const statusValue = document.getElementById('schedStatusValue');
+  const nextRunEl = document.getElementById('schedNextRun');
+  const lastRunEl = document.getElementById('schedLastRun');
+
+  if (enabledEl) enabledEl.checked = config.enabled;
+  if (labelEl) labelEl.textContent = config.enabled ? 'On' : 'Off';
+  if (freqEl) freqEl.value = config.frequency;
+  if (timeEl) timeEl.value = config.time;
+  if (intervalEl) intervalEl.value = config.intervalHours;
+  if (timeField) timeField.style.display = config.frequency === 'daily' ? '' : 'none';
+  if (intervalField) intervalField.style.display = config.frequency === 'interval' ? '' : 'none';
+
+  if (statusValue) {
+    statusValue.textContent = config.enabled ? 'Active' : 'Disabled';
+    statusValue.className = `sched-status-value ${config.enabled ? 'sched-on' : 'sched-off'}`;
+  }
+  if (nextRunEl) nextRunEl.textContent = config.enabled ? formatSchedDateTime(computeNextRun(config)) : '—';
+  if (lastRunEl) lastRunEl.textContent = config.lastRun ? formatSchedDateTime(config.lastRun) : 'Never';
+
+  renderSchedLog();
+}
+
+// Reuses the exact same fetchLatestPrices() flow as the ▶ Fetch Prices
+// button, so a scheduled run pulls fresh data through the normal job/poll
+// pipeline and updates the Fetch & Analyse table the same way a manual click would.
+async function runScheduledFetch(trigger) {
+  const config = loadSchedConfig();
+  try {
+    await fetchLatestPrices();
+    const statusLine = document.getElementById('statusLine');
+    const failed = statusLine?.classList.contains('error');
+    config.lastRun = new Date().toISOString();
+    saveSchedConfig(config);
+    pushSchedLog({ time: config.lastRun, trigger, ok: !failed, message: statusLine?.textContent || (failed ? 'Failed' : 'Success') });
+  } catch (error) {
+    config.lastRun = new Date().toISOString();
+    saveSchedConfig(config);
+    pushSchedLog({ time: config.lastRun, trigger, ok: false, message: error.message || 'Failed' });
+  }
+  renderSchedulerUI();
+}
+
+function tickScheduler() {
+  const config = loadSchedConfig();
+  if (!config.enabled) return;
+  if (new Date() >= computeNextRun(config)) {
+    runScheduledFetch('scheduled');
+  } else if (document.getElementById('tab-scheduler')?.classList.contains('active')) {
+    // Keep the "Next Run" readout live while the person is looking at this tab.
+    const nextRunEl = document.getElementById('schedNextRun');
+    if (nextRunEl) nextRunEl.textContent = formatSchedDateTime(computeNextRun(config));
+  }
+}
+
+function bindScheduler() {
+  document.getElementById('schedEnabled')?.addEventListener('change', (event) => {
+    const config = loadSchedConfig();
+    config.enabled = event.target.checked;
+    saveSchedConfig(config);
+    renderSchedulerUI();
+  });
+
+  document.getElementById('schedFrequency')?.addEventListener('change', (event) => {
+    const config = loadSchedConfig();
+    config.frequency = event.target.value;
+    saveSchedConfig(config);
+    renderSchedulerUI();
+  });
+
+  document.getElementById('schedTime')?.addEventListener('change', (event) => {
+    const config = loadSchedConfig();
+    config.time = event.target.value || '09:00';
+    saveSchedConfig(config);
+    renderSchedulerUI();
+  });
+
+  document.getElementById('schedInterval')?.addEventListener('change', (event) => {
+    const config = loadSchedConfig();
+    config.intervalHours = Math.min(24, Math.max(1, Number(event.target.value) || 6));
+    saveSchedConfig(config);
+    renderSchedulerUI();
+  });
+
+  document.getElementById('schedRunNowBtn')?.addEventListener('click', () => runScheduledFetch('manual'));
+
+  document.getElementById('schedClearLogBtn')?.addEventListener('click', () => {
+    localStorage.removeItem(SCHED_LOG_KEY);
+    renderSchedLog();
+  });
+
+  renderSchedulerUI();
+  if (schedTickHandle) clearInterval(schedTickHandle);
+  schedTickHandle = setInterval(tickScheduler, SCHED_TICK_MS);
+}
+
 /* ============================== INIT ============================== */
 
 async function init() {
   const user = await initAuth();
   if (!user) return; // initAuth() is already redirecting to /login
-  bindLogout();
+  bindUserMenu();
 
   loadState();
   setDateChip();
@@ -1077,6 +2226,7 @@ async function init() {
   bindProductsTab();
   wireCsvCopyButtons();
   bindOCR()
+  bindScheduler();
 
   refreshProductDependents();
 
@@ -1098,12 +2248,15 @@ async function init() {
     event.currentTarget.classList.remove('loading');
     setStatus('✓ Synced with the Flask backend', 'ok');
   });
-  document.getElementById('testConnBtn')?.addEventListener('click', () => checkBackend(true));
+  document.getElementById('backendPill')?.addEventListener('click', () => checkBackend(true));
   document.getElementById('fetchBtn')?.addEventListener('click', fetchLatestPrices);
 
   document.getElementById('varRetailer')?.addEventListener('change', renderVariationTab);
   document.getElementById('varProduct')?.addEventListener('change', renderVariationTab);
+  document.getElementById('varRange')?.addEventListener('change', renderVariationTab);
   document.getElementById('varChartType')?.addEventListener('change', renderVariationTab);
+
+  document.getElementById('anaRange')?.addEventListener('change', renderAnalyticsTab);
 
   document.addEventListener('click', closeAllDropdowns);
 

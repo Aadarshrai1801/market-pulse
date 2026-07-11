@@ -22,10 +22,18 @@
 
 body {
     margin: 0;
-    background: var(--bg);
+    min-height: 100vh;
     color: var(--text);
     font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 14px;
+    background-color: var(--bg);
+    background-image:
+        radial-gradient(ellipse 900px 700px at 0% 20%, rgba(34, 211, 238, 0.10), transparent 60%),
+        linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: auto, 42px 42px, 42px 42px;
+    background-position: 0 0, 0 0, 0 0;
+    background-attachment: fixed;
 }
 
 .wrap {
@@ -175,12 +183,27 @@ body {
     align-items: center;
     gap: 6px;
     background: rgba(79, 209, 165, 0.12);
+    border: 1px solid transparent;
     color: var(--green);
+    font-family: inherit;
     padding: 7px 12px;
     border-radius: 20px;
     font-size: 11.5px;
     font-weight: 700;
     letter-spacing: 0.06em;
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.live-pill.checking {
+    background: var(--panel-2);
+    border-color: var(--border);
+    color: var(--dim);
+}
+
+.live-pill.err {
+    background: rgba(226, 104, 94, 0.12);
+    color: var(--red);
 }
 
 .live-dot {
@@ -189,6 +212,17 @@ body {
     border-radius: 50%;
     background: var(--green);
     box-shadow: 0 0 8px var(--green);
+    flex: none;
+}
+
+.live-pill.checking .live-dot {
+    background: var(--dim);
+    box-shadow: none;
+}
+
+.live-pill.err .live-dot {
+    background: var(--red);
+    box-shadow: 0 0 8px var(--red);
 }
 
 .date-pill {
@@ -292,72 +326,7 @@ body {
     letter-spacing: 0.02em;
 }
 
-/* ---------------- source / backend card ---------------- */
-.source-card {
-    border: 1px solid rgba(79, 209, 165, 0.35);
-    background: rgba(79, 209, 165, 0.06);
-    border-radius: 10px;
-    padding: 18px 22px;
-    margin-bottom: 18px;
-}
-
-.source-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-}
-
-.source-title {
-    font-weight: 800;
-    font-size: 13px;
-    letter-spacing: 0.03em;
-    color: var(--green);
-}
-
-.source-pill {
-    font-size: 11px;
-    color: var(--dim);
-    border: 1px solid var(--border);
-    padding: 4px 10px;
-    border-radius: 20px;
-}
-
-.source-pill.ok {
-    color: var(--green);
-    border-color: rgba(79, 209, 165, 0.4);
-}
-
-.source-pill.err {
-    color: var(--red);
-    border-color: rgba(226, 104, 94, 0.4);
-}
-
-.source-desc {
-    color: var(--dim);
-    font-size: 12.5px;
-    margin: 10px 0 0;
-    line-height: 1.6;
-}
-
-.source-desc code {
-    color: var(--text);
-    background: var(--panel-2);
-    padding: 1px 6px;
-    border-radius: 4px;
-}
-
-.link-btn {
-    background: none;
-    border: none;
-    color: var(--cyan);
-    font-family: inherit;
-    font-size: 12.5px;
-    cursor: pointer;
-    padding: 0;
-    margin-left: 8px;
-    text-decoration: underline;
-}
+/* ---------------- backend connectivity (folded into .live-pill above) ---------------- */
 
 /* ---------------- panels ---------------- */
 .panel {
@@ -406,6 +375,10 @@ body {
     grid-template-columns: 1fr 1fr 1fr;
 }
 
+.controls-4 {
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+}
+
 @media (max-width: 900px) {
     .controls {
         grid-template-columns: 1fr;
@@ -413,6 +386,10 @@ body {
 
     .controls-3 {
         grid-template-columns: 1fr;
+    }
+
+    .controls-4 {
+        grid-template-columns: 1fr 1fr;
     }
 }
 
@@ -1018,9 +995,15 @@ tbody tr:hover td.row-head {
 
 .var-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    grid-template-columns: repeat(2, 1fr);
     gap: 14px;
     margin-bottom: 18px;
+}
+
+@media (max-width: 900px) {
+    .var-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 .var-card {
@@ -1062,6 +1045,343 @@ tbody tr:hover td.row-head {
 .var-badge-flat {
     background: var(--panel-2);
     color: var(--dim);
+}
+
+/* ---------------- product focus (variation tab) ---------------- */
+.focus-tbl {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.focus-tbl th,
+.focus-tbl td {
+    text-align: left;
+    padding: 10px 14px;
+    font-size: 12.5px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.focus-tbl th {
+    color: var(--dim);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 700;
+}
+
+.focus-tbl tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.focus-tbl tr.best-row {
+    background: rgba(79, 209, 165, 0.08);
+}
+
+.focus-price {
+    font-weight: 800;
+    font-size: 14px;
+}
+
+.best-badge {
+    display: inline-block;
+    margin-left: 8px;
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 20px;
+    background: rgba(79, 209, 165, 0.15);
+    color: var(--green);
+}
+
+.focus-change-up {
+    color: var(--red);
+    font-weight: 700;
+}
+
+.focus-change-down {
+    color: var(--green);
+    font-weight: 700;
+}
+
+.focus-change-flat {
+    color: var(--dim);
+}
+
+/* ---------------- scheduler tab ---------------- */
+.sched-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 12.5px;
+    color: var(--dim);
+}
+
+.sched-toggle input {
+    display: none;
+}
+
+.sched-toggle-track {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    border-radius: 20px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    transition: background 0.15s ease;
+    flex-shrink: 0;
+}
+
+.sched-toggle-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--dim);
+    transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.sched-toggle input:checked+.sched-toggle-track {
+    background: rgba(79, 209, 165, 0.2);
+    border-color: var(--green);
+}
+
+.sched-toggle input:checked+.sched-toggle-track .sched-toggle-thumb {
+    transform: translateX(18px);
+    background: var(--green);
+}
+
+.sched-note {
+    margin-top: 14px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--dim);
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+}
+
+.sched-status-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin-top: 20px;
+}
+
+@media (max-width: 700px) {
+    .sched-status-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.sched-status-item {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+}
+
+.sched-status-label {
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--dim);
+    font-weight: 700;
+    margin-bottom: 6px;
+}
+
+.sched-status-value {
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--text);
+}
+
+.sched-status-value.sched-on {
+    color: var(--green);
+}
+
+.sched-status-value.sched-off {
+    color: var(--dim);
+}
+
+.sched-log-ok {
+    color: var(--green);
+    font-weight: 700;
+}
+
+.sched-log-err {
+    color: var(--red);
+    font-weight: 700;
+}
+
+/* ---------------- analytics tab ---------------- */
+.ana-badge {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 20px;
+    white-space: nowrap;
+}
+
+.ana-badge-low {
+    background: rgba(79, 209, 165, 0.15);
+    color: var(--green);
+}
+
+.ana-badge-med {
+    background: rgba(240, 166, 60, 0.15);
+    color: var(--orange);
+}
+
+.ana-badge-high {
+    background: rgba(226, 104, 94, 0.15);
+    color: var(--red);
+}
+
+.ana-metric-note {
+    font-size: 11px;
+    color: var(--dim);
+}
+
+.ana-forecast-up {
+    color: var(--red);
+    font-weight: 700;
+}
+
+.ana-forecast-down {
+    color: var(--green);
+    font-weight: 700;
+}
+
+.ana-forecast-flat {
+    color: var(--dim);
+    font-weight: 700;
+}
+
+.basket-qty-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.basket-qty-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+
+.basket-qty-label {
+    font-size: 12px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.basket-qty-input {
+    width: 64px;
+    padding: 6px 8px;
+    font-size: 12px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+/* ---------------- market insights (variation tab) ---------------- */
+.insights-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+@media (max-width: 900px) {
+    .insights-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.insight-card {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+}
+
+.insight-card-title {
+    font-weight: 700;
+    font-size: 13px;
+}
+
+.insight-card-sub {
+    font-size: 11px;
+    color: var(--dim);
+    margin-top: 3px;
+    margin-bottom: 14px;
+}
+
+.insight-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.insight-row:last-child {
+    border-bottom: none;
+}
+
+.insight-rank {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--panel);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--dim);
+    margin-right: 10px;
+    flex-shrink: 0;
+}
+
+.insight-left {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.insight-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.insight-count {
+    font-size: 11px;
+    color: var(--dim);
+    flex-shrink: 0;
+}
+
+.insight-mover-pct {
+    font-size: 12.5px;
+    font-weight: 800;
+    flex-shrink: 0;
 }
 
 .vtbl th,
@@ -1352,41 +1672,77 @@ tbody td.price-cell.trend-down {
    AUTH: topbar user badge + logout
    ================================================================== */
 
-.user-badge {
+.user-menu {
+    position: relative;
+}
+
+.user-menu-btn {
+    width: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px 6px 6px;
+    border-radius: 22px;
+    background: var(--panel-2);
+    font-size: 12.5px;
+}
+
+.user-menu-id {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 12px;
-    border-radius: 20px;
-    background: var(--panel-2);
-    border: 1px solid var(--border);
-    font-size: 12.5px;
-    color: var(--text);
-    white-space: nowrap;
 }
 
-.user-badge .role-chip {
+.user-avatar {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--cyan-2), var(--cyan));
+    color: #06141F;
+    font-weight: 800;
+    font-size: 11px;
+    flex: none;
+}
+
+.user-menu-text {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+    color: var(--text);
+}
+
+.user-menu-panel {
+    left: auto;
+    right: 0;
+    width: 220px;
+    padding: 6px;
+}
+
+.dd-divider {
+    height: 1px;
+    background: var(--border-soft);
+    margin: 6px 4px;
+}
+
+.dd-item-danger {
+    color: var(--red);
+}
+
+.dd-item-danger:hover {
+    background: rgba(226, 104, 94, 0.12);
+}
+
+.role-chip {
     font-size: 10px;
     font-weight: 800;
     letter-spacing: 0.04em;
     text-transform: uppercase;
     padding: 2px 8px;
     border-radius: 10px;
-}
-
-.role-chip.role-admin {
-    background: rgba(226, 104, 94, 0.18);
-    color: var(--red);
-}
-
-.role-chip.role-editor {
-    background: rgba(63, 167, 255, 0.18);
-    color: var(--cyan);
-}
-
-.role-chip.role-viewer {
-    background: rgba(92, 107, 122, 0.25);
-    color: var(--dim);
 }
 
 .logout-btn {
@@ -1484,12 +1840,102 @@ tbody td.price-cell.trend-down {
     border-color: rgba(226, 104, 94, 0.4);
 }
 
-.add-user-row {
+.add-user-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 10px;
+    align-items: end;
+}
+
+.add-user-grid .field {
+    margin-bottom: 0;
+}
+
+.add-user-grid .field-label {
+    font-size: 10.5px;
+    margin-bottom: 4px;
+}
+
+.add-user-grid .text-input,
+.add-user-grid .select-input {
+    padding: 8px 10px;
+    font-size: 12.5px;
+}
+
+.add-user-submit {
+    grid-column: 1 / -1;
+    width: 100%;
+    justify-content: center;
+    padding: 9px 14px;
+    font-size: 12.5px;
+}
+
+/* Toggle row: "Accounts" label + a small pill button that reveals the
+   add-user form on demand, so the form doesn't eat drawer space by default. */
+.add-user-toggle-row {
     display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: 10px;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    margin-top: 18px;
+}
+
+.add-user-toggle {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--cyan);
+    border-radius: 20px;
+    padding: 6px 13px;
+    font-size: 11.5px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.add-user-toggle:hover {
+    border-color: rgba(63, 167, 255, 0.5);
+    background: rgba(63, 167, 255, 0.1);
+}
+
+.add-user-toggle-icon {
+    font-size: 13px;
+    line-height: 1;
+    transition: transform 0.15s ease;
+}
+
+.add-user-toggle[aria-expanded="true"] .add-user-toggle-icon {
+    transform: rotate(45deg);
+}
+
+.add-user-toggle[aria-expanded="true"] {
+    color: var(--text);
+    border-color: var(--border);
+    background: var(--panel-3);
+}
+
+.add-user-panel {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    margin-top: 0;
+    transition: grid-template-rows 0.2s ease, opacity 0.15s ease, margin-top 0.2s ease;
+}
+
+.add-user-panel-inner {
+    min-height: 0;
+    overflow: hidden;
+}
+
+.add-user-panel.open {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    margin-top: 12px;
+}
+
+.add-user-panel .status-line {
+    margin-top: 8px;
 }
 
 .add-user-row .field {
@@ -1501,4 +1947,274 @@ tbody td.price-cell.trend-down {
    "why can't I click this" reason discoverable via the title tooltip. */
 .disabled-viewer {
     cursor: not-allowed;
+}
+
+/* ==================================================================
+   MODALS: shared overlay/card shell (User Management, Change Password)
+   ================================================================== */
+
+.modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 300;
+    background: rgba(6, 10, 15, 0.72);
+    backdrop-filter: blur(3px);
+    align-items: flex-start;
+    justify-content: center;
+    padding: 6vh 16px;
+    overflow-y: auto;
+}
+
+.modal-overlay.open {
+    display: flex;
+}
+
+.modal-card {
+    width: 100%;
+    max-width: 420px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+}
+
+.modal-card.modal-wide {
+    max-width: 640px;
+}
+
+/* User Management is pinned to the right edge as a slide-in drawer instead
+   of a centered dialog, so it reads as a docked panel rather than a
+   full-attention interruption. */
+.modal-overlay-drawer {
+    justify-content: flex-end;
+    align-items: stretch;
+    padding: 0;
+    background: rgba(6, 10, 15, 0.55);
+}
+
+.modal-card.modal-drawer {
+    max-width: 380px;
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    border-top: none;
+    border-bottom: none;
+    border-right: none;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.22s ease;
+}
+
+.modal-overlay-drawer.open .modal-card.modal-drawer {
+    transform: translateX(0);
+}
+
+.modal-card.modal-drawer .modal-body {
+    max-height: none;
+    flex: 1;
+}
+
+@media (max-width: 480px) {
+    .modal-card.modal-drawer {
+        max-width: 100%;
+    }
+}
+
+.modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 22px;
+    border-bottom: 1px solid var(--border-soft);
+}
+
+.modal-title {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--text);
+}
+
+.modal-close {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--dim);
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.modal-close:hover {
+    color: var(--red);
+    border-color: rgba(226, 104, 94, 0.4);
+}
+
+.modal-body {
+    padding: 22px;
+    max-height: 72vh;
+    overflow-y: auto;
+}
+
+.modal-body .field {
+    margin-bottom: 14px;
+}
+
+/* ==================================================================
+   USER MANAGEMENT: account cards (replaces the old plain table)
+   ================================================================== */
+
+.user-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.user-card {
+    padding: 12px 14px;
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    background: var(--panel-2);
+}
+
+.user-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.user-card-name {
+    font-weight: 700;
+    font-size: 14.5px;
+    color: var(--text);
+}
+
+.user-card-username {
+    font-size: 12.5px;
+    color: var(--cyan);
+    margin-top: 2px;
+}
+
+.user-card-top .role-chip {
+    font-size: 10.5px;
+    padding: 4px 11px;
+    border-radius: 20px;
+    flex: none;
+}
+
+.role-chip.role-admin {
+    background: rgba(245, 166, 35, 0.16);
+    color: #F5A623;
+}
+
+.role-chip.role-editor {
+    background: rgba(79, 209, 165, 0.16);
+    color: var(--green);
+}
+
+.role-chip.role-viewer {
+    background: rgba(63, 167, 255, 0.16);
+    color: var(--cyan);
+}
+
+.user-card-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+
+.user-card-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.user-card-controls .role-select {
+    width: 120px;
+    background: var(--panel-3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: 12.5px;
+}
+
+.user-card-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.user-card-btn:hover {
+    color: var(--cyan);
+    border-color: rgba(63, 167, 255, 0.4);
+}
+
+.user-card-btn.danger {
+    color: var(--red);
+    border-color: rgba(226, 104, 94, 0.45);
+    background: rgba(226, 104, 94, 0.08);
+}
+
+.user-card-btn.danger:hover {
+    background: rgba(226, 104, 94, 0.18);
+    border-color: var(--red);
+}
+
+.user-card-joined {
+    font-size: 12px;
+    color: var(--dim);
+    white-space: nowrap;
+}
+
+/* Secondary, less-prominent actions (Deactivate, Change Password) tucked
+   under the main role/Revoke row so that row alone matches the compact
+   reference layout. */
+.user-card-secondary {
+    display: flex;
+    gap: 16px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border-soft);
+}
+
+.user-card-link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--dim);
+    font-size: 11px;
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+}
+
+.user-card-link:hover {
+    color: var(--cyan);
+}
+
+.user-card.inactive {
+    opacity: 0.55;
 }

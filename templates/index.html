@@ -4,9 +4,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Intellicrop</title>
+  <title>MARKETPULSE</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+  <script>
+    // Some networks/proxies block cdnjs.cloudflare.com specifically. If the
+    // primary CDN above didn't give us the Chart global, try two more
+    // providers in order before giving up - app.js/charts.js already handle
+    // the case where Chart is still undefined after all of this.
+    (function retryChartCdn(fallbacks) {
+      if (typeof Chart !== 'undefined' || !fallbacks.length) return;
+      var src = fallbacks[0];
+      var s = document.createElement('script');
+      s.src = src;
+      s.onload = function () { console.log('[MarketPulse] Chart.js loaded from fallback:', src); };
+      s.onerror = function () { retryChartCdn(fallbacks.slice(1)); };
+      document.head.appendChild(s);
+    })([
+      'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js',
+      'https://unpkg.com/chart.js@4.4.4/dist/chart.umd.min.js',
+    ]);
+  </script>
 </head>
 
 <body>
@@ -26,13 +44,29 @@
 
     <div class="topbar-actions">
       <button class="btn-sync" id="syncBtn" type="button"><span class="spin-ico">⟳</span> Sync</button>
-      <span class="live-pill"><span class="live-dot"></span>LIVE</span>
+      <button class="live-pill" id="backendPill" type="button" title="Click to re-check the Python backend connection">
+        <span class="live-dot" id="backendDot"></span><span id="backendPillText">LIVE</span>
+      </button>
       <span class="date-pill" id="dateChip">—</span>
-      <span class="user-badge" id="userBadge" style="display:none;">
-        <span id="userBadgeName">—</span>
-        <span class="role-chip" id="userBadgeRole">—</span>
-      </span>
-      <button class="logout-btn" id="logoutBtn" type="button" style="display:none;">Sign out</button>
+      <div class="user-menu">
+        <button class="dd-btn user-menu-btn" id="userMenuBtn" type="button" style="display:none;">
+          <span class="user-menu-id">
+            <span class="user-avatar" id="userAvatar">—</span>
+            <span class="user-menu-text">
+              <span id="userBadgeName">—</span>
+              <span class="role-chip" id="userBadgeRole">—</span>
+            </span>
+          </span>
+          <span class="chev">▾</span>
+        </button>
+        <div class="dd-panel user-menu-panel" id="userMenuPanel">
+          <div class="dd-item" id="menuUserManagement" style="display:none;"><span>🛡</span><span>User Management</span>
+          </div>
+          <div class="dd-item" id="menuChangePassword"><span>👤</span><span>Account Settings</span></div>
+          <div class="dd-divider"></div>
+          <div class="dd-item dd-item-danger" id="menuSignOut"><span>⏻</span><span>Sign Out</span></div>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -42,25 +76,12 @@
       <button class="tab-btn active" data-tab="fetch">⚡ FETCH &amp; ANALYSE</button>
       <button class="tab-btn" data-tab="products">🧩 PRODUCTS</button>
       <button class="tab-btn" data-tab="images">⌨ IMPORT IMAGES</button>
-      <button class="tab-btn" data-tab="variation">☑ PRICE VARIATION</button>
+      <button class="tab-btn" data-tab="variation">📊 MARKET INTELLIGENCE</button>
       <button class="tab-btn" data-tab="scheduler">⏰ SCHEDULER</button>
-      <button class="tab-btn" data-tab="admin" id="adminTabBtn" style="display:none;">🛡 ADMIN</button>
     </nav>
 
     <!-- ===================== FETCH & ANALYSE ===================== -->
     <section class="tab-panel active" id="tab-fetch">
-
-      <section class="source-card" id="sourceCard">
-        <div class="source-top">
-          <span class="source-title">🐍 PYTHON SCRAPER BACKEND</span>
-          <span class="source-pill" id="sourcePill">checking…</span>
-        </div>
-        <p class="source-desc">
-          Prices are fetched directly by your <code>scraper.py</code> script running on the Flask backend — no Anthropic
-          API key required, nothing is stored in the browser.
-          <button class="link-btn" id="testConnBtn" type="button">Test connection →</button>
-        </p>
-      </section>
 
       <section class="stats-grid">
         <div class="stat-card">
@@ -380,132 +401,409 @@
 
       </div>
 
-      <!-- ===================== PRICE VARIATION ===================== -->
-      <section class="tab-panel" id="tab-variation">
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <div class="panel-title">Price Variation</div>
-              <div class="panel-sub" id="varSub">Last 30 days</div>
-            </div>
-            <div class="panel-actions">
-              <button class="ghost-btn" id="btnExportVariation" type="button">↓ CSV</button>
-            </div>
-          </div>
+    </section>
 
-          <div class="controls controls-3">
-            <div class="field">
-              <div class="field-label">Retailer</div>
-              <select class="select-input" id="varRetailer">
-                <option value="all">All Retailers</option>
-              </select>
-            </div>
-            <div class="field">
-              <div class="field-label">Product</div>
-              <select class="select-input" id="varProduct">
-                <option value="all">All Products</option>
-              </select>
-            </div>
-            <div class="field">
-              <div class="field-label">Chart Type</div>
-              <select class="select-input" id="varChartType">
-                <option value="line">Line</option>
-                <option value="bar">Bar</option>
-              </select>
-            </div>
-          </div>
+    <!-- ===================== PRICE VARIATION ===================== -->
+    <section class="tab-panel" id="tab-variation">
 
-          <div class="var-summary">
-            <div class="var-sum-item up"><span id="vs-up">0</span> rising</div>
-            <div class="var-sum-item down"><span id="vs-down">0</span> falling</div>
-            <div class="var-sum-item flat"><span id="vs-flat">0</span> stable</div>
-            <div class="var-sum-item"><span id="vs-dates">0</span> dates</div>
-          </div>
-
-          <div style="position:relative;height:260px;margin-top:16px;">
-            <canvas id="overviewChart"></canvas>
-          </div>
+      <section class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">🏬</div>
+          <div class="stat-num" id="vRetailers">—</div>
+          <div class="stat-label">Retailers Compared</div>
         </div>
-
-        <div class="var-grid" id="varChartsGrid"></div>
-
-        <div class="panel" id="varTableCard" style="display:none;">
-          <div class="panel-title">Detail Table</div>
-          <div class="table-scroll" style="margin-top:12px;">
-            <div id="varTableBody"></div>
-          </div>
+        <div class="stat-card">
+          <div class="stat-icon">🥦</div>
+          <div class="stat-num" id="vProducts">—</div>
+          <div class="stat-label">Products In View</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📅</div>
+          <div class="stat-num" id="vDates">—</div>
+          <div class="stat-label">Dates In Range</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📊</div>
+          <div class="stat-num" id="vPoints">—</div>
+          <div class="stat-label">Data Points</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">💰</div>
+          <div class="stat-num" id="vAvg">—</div>
+          <div class="stat-label">Avg Price AED/kg</div>
         </div>
       </section>
 
-      <!-- ===================== SCHEDULER ===================== -->
-      <section class="tab-panel" id="tab-scheduler">
-        <div class="panel">
-          <div class="panel-title">Scheduler</div>
-          <div class="panel-sub" style="margin-top:6px;">
-            Not wired up yet. The natural way to add this is a periodic job (cron, APScheduler, or a Celery beat task)
-            on the Flask backend that calls the same routine <code>/api/jobs</code> uses to run <code>scraper.py</code>
-            on an interval, so this tab would just show recent run history and let you edit the schedule.
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Price Variation</div>
+            <div class="panel-sub" id="varSub">Last 30 days</div>
+          </div>
+          <div class="panel-actions">
+            <button class="ghost-btn" id="btnExportVariation" type="button">↓ CSV</button>
           </div>
         </div>
-      </section>
 
-      <!-- ===================== ADMIN: USER MANAGEMENT ===================== -->
-      <section class="tab-panel" id="tab-admin">
-        <div class="panel">
-          <div class="panel-head">
-            <div>
-              <div class="panel-title">User Management</div>
-              <div class="panel-sub">Create accounts and control who can view, fetch, or administer this app</div>
-            </div>
+        <div class="controls controls-4">
+          <div class="field">
+            <div class="field-label">Retailer / Supermarket</div>
+            <select class="select-input" id="varRetailer">
+              <option value="all">All Retailers</option>
+            </select>
           </div>
-
-          <div class="table-scroll">
-            <table class="utbl" id="usersTable">
-              <thead>
-                <tr>
-                  <th>Username</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="usersBody">
-                <tr>
-                  <td colspan="5">
-                    <div class="empty-state">Loading users…</div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+          <div class="field">
+            <div class="field-label">Product</div>
+            <select class="select-input" id="varProduct">
+              <option value="all">All Products</option>
+            </select>
           </div>
-
-          <div class="section-label section-label-spaced">Add New User</div>
-          <div class="add-user-row">
-            <div class="field">
-              <div class="field-label">Username</div>
-              <input class="text-input" id="newUserName" placeholder="e.g. sara">
-            </div>
-            <div class="field">
-              <div class="field-label">Password</div>
-              <input class="text-input" id="newUserPassword" type="password" placeholder="min. 6 characters">
-            </div>
-            <div class="field">
-              <div class="field-label">Role</div>
-              <select class="select-input" id="newUserRole">
-                <option value="viewer">Viewer — view only</option>
-                <option value="editor">Editor — can fetch/scan</option>
-                <option value="admin">Admin — full access</option>
-              </select>
-            </div>
-            <button class="fetch-btn" id="btnAddUser" type="button">+ Add User</button>
+          <div class="field">
+            <div class="field-label">Date Range</div>
+            <select class="select-input" id="varRange">
+              <option value="7">Last 7 days</option>
+              <option value="30" selected>Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="all">All time</option>
+            </select>
           </div>
-
-          <div class="status-line" id="adminStatus" style="margin-top:18px;">—</div>
+          <div class="field">
+            <div class="field-label">Chart Type</div>
+            <select class="select-input" id="varChartType">
+              <option value="line">Line</option>
+              <option value="bar">Bar</option>
+            </select>
+          </div>
         </div>
-      </section>
+
+        <div class="var-summary">
+          <div class="var-sum-item up"><span id="vs-up">0</span> rising</div>
+          <div class="var-sum-item down"><span id="vs-down">0</span> falling</div>
+          <div class="var-sum-item flat"><span id="vs-flat">0</span> stable</div>
+          <div class="var-sum-item"><span id="vs-dates">0</span> dates</div>
+        </div>
+
+        <div style="position:relative;height:260px;margin-top:16px;">
+          <canvas id="overviewChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Two quick-read analysis cards: which retailer wins on price most
+           often, and which products moved the most since the last fetch. -->
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Market Insights</div>
+            <div class="panel-sub">Who's cheapest, and what moved</div>
+          </div>
+        </div>
+        <div class="insights-grid">
+          <div class="insight-card">
+            <div class="insight-card-title">🏆 Best Value Retailers</div>
+            <div class="insight-card-sub">Ranked by how often they had the lowest price</div>
+            <div id="insightLeaderboard"></div>
+          </div>
+          <div class="insight-card">
+            <div class="insight-card-title">📈 Biggest Movers</div>
+            <div class="insight-card-sub">Largest price change vs. the previous fetch</div>
+            <div id="insightMovers"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shown only when a single product is selected: compares that one
+           product's price across every supermarket in range and calls out
+           the cheapest one. -->
+      <div class="panel" id="varFocusPanel" style="display:none;">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title" id="varFocusTitle">Product Focus</div>
+            <div class="panel-sub" id="varFocusSub">Price by supermarket</div>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <div id="varFocusBody"></div>
+        </div>
+      </div>
+
+      <div class="var-grid" id="varChartsGrid"></div>
+
+      <!-- ===================== DECISION ANALYTICS (merged into Market Intelligence) ===================== -->
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Decision Analytics</div>
+            <div class="panel-sub" id="anaSub">Last 30 days</div>
+          </div>
+        </div>
+        <div class="controls">
+          <div class="field">
+            <div class="field-label">Date Range</div>
+            <select class="select-input" id="anaRange">
+              <option value="7">Last 7 days</option>
+              <option value="30" selected>Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="all">All time</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Volatility & statistical summary: which products swing the most,
+           so buyers know where price risk (and negotiation room) is. -->
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">📉 Price Volatility &amp; Statistical Summary</div>
+            <div class="panel-sub">Ranked by coefficient of variation (CV) — highest risk first</div>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <div id="statsTableBody"></div>
+        </div>
+      </div>
+
+      <!-- Retailer positioning + anomaly alerts side by side. -->
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Pricing Behaviour</div>
+            <div class="panel-sub">Who prices high or low, and what looks unusual</div>
+          </div>
+        </div>
+        <div class="insights-grid">
+          <div class="insight-card">
+            <div class="insight-card-title">⚖️ Retailer Price Positioning</div>
+            <div class="insight-card-sub">Average deviation from the market price on shared products</div>
+            <div id="retailerPositioningBody"></div>
+          </div>
+          <div class="insight-card">
+            <div class="insight-card-title">🚨 Anomaly Alerts</div>
+            <div class="insight-card-sub">Prices that are statistical outliers (|z-score| ≥ 2)</div>
+            <div id="anomalyBody"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Trend & forecast: direction of travel for each product, with a
+           simple linear-regression projection for the next fetch. -->
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">📈 Trend &amp; Forecast</div>
+            <div class="panel-sub">Linear trend per product, with a projected next price</div>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <div id="trendTableBody"></div>
+        </div>
+      </div>
+
+      <!-- Sourcing analysis: which origin country is cheapest per product,
+           and how much the price spreads across origins - useful for
+           procurement decisions on where to source from. -->
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">🌍 Origin &amp; Sourcing Analysis</div>
+            <div class="panel-sub">Cheapest sourcing country per product, and how much origin affects price</div>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <div id="originTableBody"></div>
+        </div>
+      </div>
+
+      <!-- Retailer price correlation: do two retailers' prices move together
+           (possible shared supplier / tacit coordination) or independently
+           (real competition) - useful context for negotiation strategy. -->
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">🔗 Retailer Price Correlation</div>
+            <div class="panel-sub">Pearson correlation between retailer pairs on shared product/date prices</div>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <div id="correlationTableBody"></div>
+        </div>
+      </div>
+
+      <!-- Basket cost comparator: pick quantities, see which single
+           supermarket is cheapest overall for a real shopping list. -->
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">🛒 Basket Cost Comparator</div>
+            <div class="panel-sub">Set quantities (kg) and compare total basket cost by retailer</div>
+          </div>
+        </div>
+        <div class="basket-qty-grid" id="basketQtyGrid"></div>
+        <div class="table-scroll" style="margin-top:16px;">
+          <div id="basketResultsBody"></div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ===================== SCHEDULER ===================== -->
+    <section class="tab-panel" id="tab-scheduler">
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">⏰ Automatic Fetch Scheduler</div>
+            <div class="panel-sub">Runs the same fetch as the ▶ Fetch Prices button, on a schedule, right in this
+              browser tab</div>
+          </div>
+          <div class="panel-actions">
+            <label class="sched-toggle">
+              <input type="checkbox" id="schedEnabled">
+              <span class="sched-toggle-track"><span class="sched-toggle-thumb"></span></span>
+              <span id="schedToggleLabel">Off</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="sched-note">
+          ⚠ This schedule runs in-browser via JavaScript timers — it only fires while this tab stays open (it can be
+          in the background, but not closed). Closing the browser or this tab pauses it; reopening picks up from
+          "next run" again. For a schedule that runs even with everything closed, it would need a server-side job.
+        </div>
+
+        <div class="controls" style="margin-top:16px;">
+          <div class="field">
+            <div class="field-label">Frequency</div>
+            <select class="select-input" id="schedFrequency">
+              <option value="daily">Daily at a set time</option>
+              <option value="interval">Every N hours</option>
+            </select>
+          </div>
+          <div class="field" id="schedTimeField">
+            <div class="field-label">Time of day</div>
+            <input type="time" class="select-input" id="schedTime" value="09:00">
+          </div>
+          <div class="field" id="schedIntervalField" style="display:none;">
+            <div class="field-label">Every (hours)</div>
+            <input type="number" class="select-input" id="schedInterval" min="1" max="24" step="1" value="6">
+          </div>
+          <button class="fetch-btn" id="schedRunNowBtn" type="button">▶ Run Now</button>
+        </div>
+
+        <div class="sched-status-grid">
+          <div class="sched-status-item">
+            <div class="sched-status-label">Status</div>
+            <div class="sched-status-value" id="schedStatusValue">Disabled</div>
+          </div>
+          <div class="sched-status-item">
+            <div class="sched-status-label">Next Run</div>
+            <div class="sched-status-value" id="schedNextRun">—</div>
+          </div>
+          <div class="sched-status-item">
+            <div class="sched-status-label">Last Run</div>
+            <div class="sched-status-value" id="schedLastRun">—</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Run History</div>
+            <div class="panel-sub">Most recent scheduled and manual runs from this browser</div>
+          </div>
+          <div class="panel-actions">
+            <button class="ghost-btn" id="schedClearLogBtn" type="button">🗑 Clear Log</button>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <div id="schedLogBody"></div>
+        </div>
+      </div>
+
+    </section>
 
   </main>
+
+  <!-- ===================== MODAL: USER MANAGEMENT (admin only) ===================== -->
+  <div class="modal-overlay modal-overlay-drawer" id="userMgmtOverlay">
+    <div class="modal-card modal-drawer">
+      <div class="modal-head">
+        <div class="modal-title"><span>🛡</span> User Management</div>
+        <button class="modal-close" id="closeUserMgmt" type="button">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="add-user-toggle-row">
+          <div class="section-label">Accounts</div>
+          <button class="add-user-toggle" id="toggleAddUser" type="button" aria-expanded="false">
+            <span class="add-user-toggle-icon">+</span> Add User
+          </button>
+        </div>
+
+        <div class="add-user-panel" id="addUserPanel">
+          <div class="add-user-panel-inner">
+            <div class="add-user-grid">
+              <div class="field">
+                <div class="field-label">Username</div>
+                <input class="text-input" id="newUserName" placeholder="e.g. sara">
+              </div>
+              <div class="field">
+                <div class="field-label">Password</div>
+                <input class="text-input" id="newUserPassword" type="password" placeholder="min. 6 characters">
+              </div>
+              <div class="field">
+                <div class="field-label">Role</div>
+                <select class="select-input" id="newUserRole">
+                  <option value="viewer">Viewer — view only</option>
+                  <option value="editor">Editor — can fetch/scan</option>
+                  <option value="admin">Admin — full access</option>
+                </select>
+              </div>
+              <button class="fetch-btn add-user-submit" id="btnAddUser" type="button">+ Add User</button>
+            </div>
+            <div class="status-line" id="adminStatus" style="display:none;"></div>
+          </div>
+        </div>
+
+        <div class="user-cards" id="usersBody">
+          <div class="empty-state">Loading users…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== MODAL: ACCOUNT SETTINGS ===================== -->
+  <div class="modal-overlay" id="changePwOverlay">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div class="modal-title"><span>👤</span> Account Settings</div>
+        <button class="modal-close" id="closeChangePw" type="button">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <div class="field-label">Username</div>
+          <input class="text-input" id="cpUsername" type="text" autocomplete="username">
+        </div>
+        <div class="field">
+          <div class="field-label">Current Password <span style="opacity:.6;">(required to save changes)</span></div>
+          <input class="text-input" id="cpCurrent" type="password" autocomplete="current-password">
+        </div>
+        <div class="field">
+          <div class="field-label">New Password <span style="opacity:.6;">(leave blank to keep current password)</span>
+          </div>
+          <input class="text-input" id="cpNew" type="password" autocomplete="new-password"
+            placeholder="min. 6 characters">
+        </div>
+        <div class="field">
+          <div class="field-label">Confirm New Password</div>
+          <input class="text-input" id="cpConfirm" type="password" autocomplete="new-password">
+        </div>
+        <button class="fetch-btn login-submit" id="cpSubmit" type="button">Save Changes</button>
+        <div class="status-line" id="cpStatus" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>

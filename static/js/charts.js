@@ -8,6 +8,11 @@ export function destroyCharts() {
 }
 
 export function renderVariationCharts(data30, dates, retailers, products, lookup) {
+  const chartLibAvailable = typeof Chart !== 'undefined';
+  if (!chartLibAvailable) {
+    console.error('[MarketPulse] Chart.js failed to load — check your network/CDN access to cdnjs.cloudflare.com. Charts will be skipped but tables will still render.');
+  }
+
   const overviewLabels = [];
   const overviewValues = [];
   const overviewColors = [];
@@ -33,12 +38,19 @@ export function renderVariationCharts(data30, dates, retailers, products, lookup
   document.getElementById('vs-dates').textContent = dates.length;
   document.getElementById('varSub').textContent = `${dates[0]} → ${dates[dates.length - 1]} · ${dates.length} date${dates.length !== 1 ? 's' : ''}`;
   destroyCharts();
-  if (overviewCtx) {
-    charts.overview = new Chart(overviewCtx, {
-      type: 'bar',
-      data: { labels: overviewLabels, datasets: [{ label: '% Change vs Previous Date', data: overviewValues, backgroundColor: overviewColors, borderColor: overviewColors, borderWidth: 1, borderRadius: 4 }] },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#6b8aaa', font: { size: 10 } }, grid: { color: 'rgba(30,45,61,.6)' } }, y: { ticks: { color: '#6b8aaa', font: { size: 10 }, callback: (value) => `${value > 0 ? '+' : ''}${value}%` }, grid: { color: 'rgba(30,45,61,.6)' } } } },
-    });
+  if (overviewCtx && chartLibAvailable) {
+    try {
+      charts.overview = new Chart(overviewCtx, {
+        type: 'bar',
+        data: { labels: overviewLabels, datasets: [{ label: '% Change vs Previous Date', data: overviewValues, backgroundColor: overviewColors, borderColor: overviewColors, borderWidth: 1, borderRadius: 4 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#6b8aaa', font: { size: 10 } }, grid: { color: 'rgba(30,45,61,.6)' } }, y: { ticks: { color: '#6b8aaa', font: { size: 10 }, callback: (value) => `${value > 0 ? '+' : ''}${value}%` }, grid: { color: 'rgba(30,45,61,.6)' } } } },
+      });
+    } catch (error) {
+      console.error('[MarketPulse] Failed to render overview chart:', error);
+    }
+  } else if (!chartLibAvailable && overviewCtx) {
+    const wrap = document.getElementById('overviewChart')?.parentElement;
+    if (wrap) wrap.innerHTML = '<div class="empty-state">Chart library didn\'t load — check your internet connection, then refresh. The tables below still work.</div>';
   }
 
   const grid = document.getElementById('varChartsGrid');
@@ -58,12 +70,17 @@ export function renderVariationCharts(data30, dates, retailers, products, lookup
     const badge = direction === 'up' ? `<span class="var-badge var-badge-up">▲ ${pct.toFixed(1)}%</span>` : direction === 'down' ? `<span class="var-badge var-badge-down">▼ ${pct.toFixed(1)}%</span>` : '<span class="var-badge var-badge-flat">● Stable</span>';
     card.innerHTML = `<div class="var-card-top"><div class="var-prod">${escapeHtml(productMeta.emoji || '🛒')} ${escapeHtml(productMeta.name || productId)}</div>${badge}</div><div style="position:relative;height:220px;"><canvas id="${canvasId}"></canvas></div>`;
     grid.appendChild(card);
+    if (!chartLibAvailable) return;
     const chartCtx = document.getElementById(canvasId)?.getContext('2d');
     if (!chartCtx) return;
-    charts[canvasId] = new Chart(chartCtx, {
-      type: document.getElementById('varChartType')?.value || 'line',
-      data: { labels: dates.map((date) => new Date(`${date}T12:00:00`).toLocaleDateString('en-AE', { day: '2-digit', month: 'short' })), datasets: retailers.map((retailerId, index) => ({ label: retailerId, data: dates.map((date) => { const row = lookup[`${date}|${normalizeRetailerId(retailerId)}|${normalizeProductId(productId)}`]; return row && row.price > 0 ? row.price : null; }), borderColor: ['#38bdf8', '#4ade80', '#fb923c', '#c084fc', '#f472b6'][index % 5], backgroundColor: 'rgba(56,189,248,0.08)', tension: 0.35, spanGaps: true })) },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: retailers.length > 1, labels: { color: '#8b949e', font: { size: 10 } } }, tooltip: { callbacks: { label: (context) => ` ${context.dataset.label}: AED ${context.raw?.toFixed(2)}` } } }, scales: { x: { ticks: { color: '#4a6580', font: { size: 9 } }, grid: { color: 'rgba(30,45,61,.5)' } }, y: { ticks: { color: '#4a6580', font: { size: 9 }, callback: (value) => `AED ${value.toFixed(2)}` }, grid: { color: 'rgba(30,45,61,.5)' } } } },
-    });
+    try {
+      charts[canvasId] = new Chart(chartCtx, {
+        type: document.getElementById('varChartType')?.value || 'line',
+        data: { labels: dates.map((date) => new Date(`${date}T12:00:00`).toLocaleDateString('en-AE', { day: '2-digit', month: 'short' })), datasets: retailers.map((retailerId, index) => ({ label: retailerId, data: dates.map((date) => { const row = lookup[`${date}|${normalizeRetailerId(retailerId)}|${normalizeProductId(productId)}`]; return row && row.price > 0 ? row.price : null; }), borderColor: ['#38bdf8', '#4ade80', '#fb923c', '#c084fc', '#f472b6'][index % 5], backgroundColor: 'rgba(56,189,248,0.08)', tension: 0.35, spanGaps: true })) },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: retailers.length > 1, labels: { color: '#8b949e', font: { size: 10 } } }, tooltip: { callbacks: { label: (context) => ` ${context.dataset.label}: AED ${context.raw?.toFixed(2)}` } } }, scales: { x: { ticks: { color: '#4a6580', font: { size: 9 } }, grid: { color: 'rgba(30,45,61,.5)' } }, y: { ticks: { color: '#4a6580', font: { size: 9 }, callback: (value) => `AED ${value.toFixed(2)}` }, grid: { color: 'rgba(30,45,61,.5)' } } } },
+      });
+    } catch (error) {
+      console.error(`[MarketPulse] Failed to render chart for ${productId}:`, error);
+    }
   });
 }

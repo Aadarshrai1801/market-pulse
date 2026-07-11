@@ -139,6 +139,19 @@ def create_user(username, password, role):
     conn.close()
 
 
+def update_username(user_id, new_username):
+    new_username = (new_username or "").strip()
+    if not new_username:
+        raise ValueError("Username is required.")
+    existing = get_user_by_username(new_username)
+    if existing and existing["id"] != user_id:
+        raise ValueError(f"Username '{new_username}' is already taken.")
+    conn = _get_conn()
+    conn.execute("UPDATE users SET username = ? WHERE id = ?", (new_username, user_id))
+    conn.commit()
+    conn.close()
+
+
 def update_user_role(user_id, role):
     if role not in ROLES:
         raise ValueError(f"Invalid role '{role}'. Must be one of {ROLES}.")
@@ -292,6 +305,45 @@ def api_change_own_password():
         return jsonify({"ok": False, "error": str(e)}), 400
 
     return jsonify({"ok": True})
+
+
+@auth_bp.route("/api/auth/profile", methods=["POST"])
+@login_required
+def api_update_own_profile():
+    """
+    Any logged-in user can update their own username and/or password from
+    the Account Settings modal. Both changes are gated behind the current
+    password to guard against a hijacked/left-open session.
+
+    Payload: { current_password, new_username?, new_password? }
+    At least one of new_username / new_password must be provided.
+    """
+    payload = request.get_json(force=True, silent=True) or {}
+    user = current_user()
+
+    if not check_password_hash(user["password_hash"], payload.get("current_password") or ""): #type: ignore
+        return jsonify({"ok": False, "error": "Current password is incorrect."}), 400
+
+    new_username = (payload.get("new_username") or "").strip()
+    new_password = payload.get("new_password") or None
+
+    if not new_username and not new_password:
+        return jsonify({"ok": False, "error": "Nothing to update."}), 400
+
+    if new_username and new_username != user["username"]: #type: ignore
+        try:
+            update_username(user["id"], new_username) #type: ignore
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+
+    if new_password:
+        try:
+            reset_password(user["id"], new_password) #type: ignore
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+
+    updated_user = get_user_by_id(user["id"]) #type: ignore
+    return jsonify({"ok": True, "user": _public_user(updated_user)})
 
 
 # ------------------------------------------------------------------

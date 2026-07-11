@@ -53,6 +53,25 @@ export async function changeOwnPassword(currentPassword, newPassword) {
   return true;
 }
 
+// Updates the logged-in user's own username and/or password in one call.
+// Pass null/undefined/empty-string for newUsername or newPassword to leave
+// that field unchanged. Returns the updated { id, username, role } user.
+export async function updateOwnProfile(currentPassword, newUsername, newPassword) {
+  const response = await fetch(`${API_BASE}/api/auth/profile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_username: newUsername || undefined,
+      new_password: newPassword || undefined,
+    }),
+  });
+  await handleAuthRedirect(response);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to update account.');
+  return data.user;
+}
+
 // ---- Admin: user management ----
 
 export async function listUsers() {

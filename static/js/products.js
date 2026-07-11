@@ -19,10 +19,11 @@ export function renderProductTags() {
 export function renderProductSelect() {
   const select = document.getElementById('selP');
   const variationSelect = document.getElementById('varProduct');
-  if (!select) return;
-  const currentValue = select.value;
-  select.innerHTML = '<option value="all">All Configured Products</option>' + appState.products.map((product) => `<option value="${product.id}">${product.emoji || '🛒'} ${product.name || product.id}</option>`).join('');
-  if ([...select.options].some((option) => option.value === currentValue)) select.value = currentValue;
+  if (select) {
+    const currentValue = select.value;
+    select.innerHTML = '<option value="all">All Configured Products</option>' + appState.products.map((product) => `<option value="${product.id}">${product.emoji || '🛒'} ${product.name || product.id}</option>`).join('');
+    if ([...select.options].some((option) => option.value === currentValue)) select.value = currentValue;
+  }
   if (variationSelect) {
     const variationCurrentValue = variationSelect.value;
     variationSelect.innerHTML = '<option value="all">All Products</option>' + appState.products.map((product) => `<option value="${product.id}">${product.name || product.id}</option>`).join('');

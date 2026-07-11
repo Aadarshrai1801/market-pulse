@@ -160,7 +160,13 @@ def _scrape_one(product, retailer):
         url = find_product_url(retailer, keyword)
         data = get_product_details(url, retailer)
         
-        current_price = _price_to_float(data.get("price"))
+        # Use per_kg_price, not "price" - that's the field every retailer
+        # module actually returns (Carrefour returns both, but Barakat,
+        # Kibsons, LuLu, and Union Coop only ever set per_kg_price), and
+        # it's also the exact column get_previous_price() reads history
+        # from below, so this keeps current vs. previous comparing
+        # like-for-like.
+        current_price = _price_to_float(data.get("per_kg_price"))
 
         previous_price = get_previous_price(
             product["id"],
@@ -170,7 +176,11 @@ def _scrape_one(product, retailer):
 
         data["previous_price"] = previous_price
 
-        if previous_price is None:
+        # Guard against either side being None (e.g. this scrape failed to
+        # find a price, or there's no usable history yet) - comparing None
+        # to a float raises TypeError and used to crash the whole job once
+        # enough history had built up.
+        if previous_price is None or current_price is None:
             data["price_change"] = "same"
         elif current_price > previous_price:
             data["price_change"] = "up"

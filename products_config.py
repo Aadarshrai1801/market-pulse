@@ -82,7 +82,7 @@ PRODUCTS = [
         "emoji": "🍊",
         "keywords": {
             "barakat": "Navel Orange",
-            "kibsons": "Navel Orange",
+            "kibsons": "orange",
             "unioncoop": "Orange Navel",
             "carrefour": "Orange Navel",
             "lulu": "Navel Orange",
