@@ -5,7 +5,7 @@ import {
 import {
   loadMeta, createJob, pollJob, loadHistory as loadHistoryApi, mapHistoryResponse, mapScrapeResult, ocrScan,
   getCurrentUser, logout, updateOwnProfile, listUsers, createUser, updateUserRole, setUserActive,
-  resetUserPassword, deleteUser, getUserStats,
+  resetUserPassword, deleteUser, getUserStats, getDbStatus,
 } from './api.js';
 import { renderProductTags, renderProductSelect, renderPresets, addProduct, resetProducts, removeProduct } from './products.js';
 import { renderVariationCharts } from './charts.js';
@@ -71,8 +71,10 @@ function applyRoleGating(user) {
   const isAdmin = user.role === 'admin';
 
   const userMgmtItem = document.getElementById('menuUserManagement');
+  const dbSettingsItem = document.getElementById('menuDbSettings');
   const adminSectionLabel = document.getElementById('menuAdminSectionLabel');
   if (userMgmtItem) userMgmtItem.style.display = isAdmin ? '' : 'none';
+  if (dbSettingsItem) dbSettingsItem.style.display = isAdmin ? '' : 'none';
   if (adminSectionLabel) adminSectionLabel.style.display = isAdmin ? '' : 'none';
 
   ['fetchBtn', 'syncBtn'].forEach((id) => {
@@ -201,6 +203,19 @@ function bindUserMenu() {
     closeAllDropdowns();
     resetChangePasswordForm();
     openModal('changePwOverlay');
+  });
+
+  document.getElementById('menuDbSettings')?.addEventListener('click', () => {
+    closeAllDropdowns();
+    openModal('dbSettingsOverlay');
+    refreshDbStatus();
+  });
+
+  document.getElementById('btnRefreshDbStatus')?.addEventListener('click', () => refreshDbStatus());
+
+  document.getElementById('closeDbSettings')?.addEventListener('click', () => closeModal('dbSettingsOverlay'));
+  document.getElementById('dbSettingsOverlay')?.addEventListener('click', (event) => {
+    if (event.target.id === 'dbSettingsOverlay') closeModal('dbSettingsOverlay');
   });
 
   document.getElementById('cpUsername')?.addEventListener('keydown', (event) => {
@@ -394,6 +409,65 @@ async function refreshUserStats() {
     // Non-critical — the account list itself still loads and works fine
     // without the stats bar, so fail silently here.
   }
+}
+
+async function refreshDbStatus() {
+  const box = document.getElementById('dbStatusBody');
+  const button = document.getElementById('btnRefreshDbStatus');
+  if (box) box.innerHTML = '<div class="empty-state">Checking connection…</div>';
+  if (button) button.disabled = true;
+  try {
+    const status = await getDbStatus();
+    renderDbStatus(status);
+  } catch (error) {
+    if (box) box.innerHTML = `<div class="empty-state">✗ ${escapeHtml(error.message)}</div>`;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function renderDbStatus(status) {
+  const box = document.getElementById('dbStatusBody');
+  if (!box) return;
+
+  const dotClass = status.connected ? 'status-active' : 'status-inactive';
+  const label = status.connected
+    ? '● Connected'
+    : (status.configured ? '○ Connection failed' : '○ Not configured');
+
+  const stats = status.collections || {};
+  const fmt = (value) => (value === null || value === undefined ? '—' : value);
+
+  box.innerHTML = `
+    <div class="db-conn-line"><span class="${dotClass}">${label}</span></div>
+    ${status.error ? `<div class="status-line error" style="display:block; margin-top:8px;">${escapeHtml(status.error)}</div>` : ''}
+    <div class="um-stats-grid" style="margin-top:16px;">
+      <div class="um-stat accent-admin">
+        <div class="um-stat-value long-value">${escapeHtml(String(fmt(status.db_name)))}</div>
+        <div class="um-stat-label">Database</div>
+      </div>
+      <div class="um-stat accent-editor">
+        <div class="um-stat-value">${status.latency_ms != null ? `${status.latency_ms} ms` : '—'}</div>
+        <div class="um-stat-label">Ping</div>
+      </div>
+      <div class="um-stat accent-viewer">
+        <div class="um-stat-value">${fmt(stats.users)}</div>
+        <div class="um-stat-label">Users</div>
+      </div>
+      <div class="um-stat accent-admin">
+        <div class="um-stat-value">${fmt(stats.price_records)}</div>
+        <div class="um-stat-label">Price Records</div>
+      </div>
+      <div class="um-stat accent-editor">
+        <div class="um-stat-value">${fmt(stats.distinct_products)}</div>
+        <div class="um-stat-label">Products Tracked</div>
+      </div>
+      <div class="um-stat accent-inactive">
+        <div class="um-stat-value long-value">${escapeHtml(String(fmt(status.host)))}</div>
+        <div class="um-stat-label">Host</div>
+      </div>
+    </div>
+  `;
 }
 
 async function refreshUsersList() {

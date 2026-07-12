@@ -2062,6 +2062,24 @@ tbody td.price-cell.trend-down {
     color: var(--red);
 }
 
+.db-conn-line .status-active {
+    color: var(--green);
+    font-weight: 700;
+    font-size: 13px;
+}
+
+.db-conn-line .status-inactive {
+    color: var(--red);
+    font-weight: 700;
+    font-size: 13px;
+}
+
+.um-stat-value.long-value {
+    font-size: 12px;
+    font-weight: 700;
+    word-break: break-all;
+}
+
 .um-filters {
     display: flex;
     gap: 8px;

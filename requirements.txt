@@ -3,8 +3,10 @@ flask>=3.0
 werkzeug>=3.0
 requests>=2.31          # used by auth.py for Google OAuth token/userinfo calls
 
-# --- Data / spreadsheet storage ---
-openpyxl>=3.1
+# --- Data storage ---
+pymongo[srv]>=4.7        # MongoDB driver (users + product price history); [srv] enables mongodb+srv:// URIs
+python-dotenv>=1.0       # loads MONGODB_URI etc. from a local .env file in dev
+openpyxl>=3.1             # still used by migrate_to_mongo.py to read your old products.xlsx once
 
 # --- Scraper ---
 # Pinned exactly (not >=) to match the Dockerfile's base image tag

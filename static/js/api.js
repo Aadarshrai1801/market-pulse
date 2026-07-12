@@ -96,6 +96,14 @@ export async function getUserStats() {
   return data.stats;
 }
 
+export async function getDbStatus() {
+  const response = await fetch(`${API_BASE}/api/admin/db/status?_=${Date.now()}`, { cache: 'no-store' });
+  await handleAuthRedirect(response);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to check database status.');
+  return data.status;
+}
+
 export async function createUser(username, password, role) {
   const response = await fetch(`${API_BASE}/api/users`, {
     method: 'POST',

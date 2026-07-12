@@ -2,7 +2,8 @@
 Authentication & user management for MarketPulse.
 
 - Session-based login (Flask's signed cookie session — no extra dependency).
-- Users live in a small SQLite database (users.db by default).
+- Users live in the `users` collection of the MongoDB database configured
+  via MONGODB_URI (see db.py).
 - Three roles, each a superset of the one before it:
     viewer  - can log in and view fetched data / history / charts, nothing else
     editor  - viewer + can trigger fetches (/api/fetch, /api/jobs) and OCR scans
@@ -28,7 +29,6 @@ Wire this into app.py like:
 
 import os
 import secrets
-import sqlite3
 import time
 from collections import defaultdict
 from datetime import datetime
@@ -38,8 +38,10 @@ from urllib.parse import urlencode
 import requests
 from flask import Blueprint, request, jsonify, session, render_template, redirect, url_for, g
 from werkzeug.security import generate_password_hash, check_password_hash
+from pymongo.errors import DuplicateKeyError
 
-DB_PATH = os.environ.get("USERS_DB_PATH", "users.db")
+from db import get_db, next_sequence, ensure_indexes
+
 ROLES = ("viewer", "editor", "admin")
 ROLE_RANK = {"viewer": 0, "editor": 1, "admin": 2}
 
@@ -94,66 +96,49 @@ def google_oauth_configured():
 # DB setup
 # ------------------------------------------------------------------
 
-def _get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _ensure_column(conn, table, column, coltype_sql):
-    """Adds `column` to `table` if it isn't there yet — lets older users.db
-    files (from before Google login / last-seen tracking existed) upgrade
-    in place instead of needing to be deleted and recreated."""
-    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-    if column not in existing:
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype_sql}")
+def _doc_to_dict(doc):
+    """Mongo doc -> plain dict, dropping the internal _id ObjectId (the
+    app uses the auto-increment `id` field everywhere instead)."""
+    if doc is None:
+        return None
+    doc = dict(doc)
+    doc.pop("_id", None)
+    return doc
 
 
 def init_auth(app):
     """
-    Create the users table if it doesn't exist yet, and seed a first admin
-    account if the table is empty. Call this once at startup, before
-    app.run() — see app.py.
+    Ensure MongoDB indexes exist, and seed a first admin account if the
+    users collection is empty. Call this once at startup, before app.run()
+    — see app.py. Raises RuntimeError immediately (via get_db()) if
+    MONGODB_URI isn't set or the cluster can't be reached, rather than
+    letting the app come up half-working.
     """
-    conn = _get_conn()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('viewer','editor','admin')),
-            is_active INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL
-        )
-    """)
-    conn.commit()
+    ensure_indexes()
+    db = get_db()
 
-    # Additive migrations — safe to run every startup.
-    _ensure_column(conn, "users", "auth_provider", "TEXT NOT NULL DEFAULT 'local'")
-    _ensure_column(conn, "users", "google_id", "TEXT")
-    _ensure_column(conn, "users", "avatar_url", "TEXT")
-    _ensure_column(conn, "users", "last_login_at", "TEXT")
-    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)")
-    conn.commit()
-
-    count = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+    count = db.users.count_documents({})
     if count == 0:
         default_user = os.environ.get("ADMIN_USERNAME", "admin")
         default_pass = os.environ.get("ADMIN_PASSWORD", "admin123")
-        conn.execute(
-            "INSERT INTO users (username, password_hash, role, is_active, created_at) "
-            "VALUES (?, ?, 'admin', 1, ?)",
-            (default_user, generate_password_hash(default_pass),
-             datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-        )
-        conn.commit()
+        db.users.insert_one({
+            "id": next_sequence("users"),
+            "username": default_user,
+            "password_hash": generate_password_hash(default_pass),
+            "role": "admin",
+            "is_active": True,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "auth_provider": "local",
+            "google_id": None,
+            "avatar_url": None,
+            "last_login_at": None,
+        })
         print(
             f"[auth] No users found — created default admin account "
             f"'{default_user}' / '{default_pass}'. Log in and change the "
             f"password immediately (or set ADMIN_USERNAME / ADMIN_PASSWORD "
             f"env vars before the very first run)."
         )
-    conn.close()
 
 
 # ------------------------------------------------------------------
@@ -161,48 +146,41 @@ def init_auth(app):
 # ------------------------------------------------------------------
 
 def get_user_by_id(user_id):
-    conn = _get_conn()
-    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    db = get_db()
+    return _doc_to_dict(db.users.find_one({"id": user_id}))
 
 
 def get_user_by_username(username):
-    conn = _get_conn()
-    row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    db = get_db()
+    return _doc_to_dict(db.users.find_one({"username": username}))
 
 
 def list_users(search=None, role=None, status=None):
     """
     Returns users, optionally filtered by a case-insensitive username
     substring (`search`), an exact `role`, and `status` ('active' /
-    'inactive'). All filters are optional and combine with AND.
+    'inactive'). All filters are optional and combine with AND. Never
+    includes password_hash.
     """
-    query = (
-        "SELECT id, username, role, is_active, created_at, auth_provider, "
-        "avatar_url, last_login_at FROM users WHERE 1=1"
-    )
-    params = []
+    query = {}
 
     if search:
-        query += " AND username LIKE ?"
-        params.append(f"%{search.strip()}%")
+        query["username"] = {"$regex": search.strip(), "$options": "i"}
     if role in ROLES:
-        query += " AND role = ?"
-        params.append(role)
+        query["role"] = role
     if status == "active":
-        query += " AND is_active = 1"
+        query["is_active"] = True
     elif status == "inactive":
-        query += " AND is_active = 0"
+        query["is_active"] = False
 
-    query += " ORDER BY id"
+    projection = {
+        "_id": 0, "id": 1, "username": 1, "role": 1, "is_active": 1,
+        "created_at": 1, "auth_provider": 1, "avatar_url": 1, "last_login_at": 1,
+    }
 
-    conn = _get_conn()
-    rows = conn.execute(query, params).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    db = get_db()
+    docs = db.users.find(query, projection).sort("id", 1)
+    return list(docs)
 
 
 def get_user_stats():
@@ -230,15 +208,22 @@ def create_user(username, password, role):
     if get_user_by_username(username):
         raise ValueError(f"Username '{username}' is already taken.")
 
-    conn = _get_conn()
-    conn.execute(
-        "INSERT INTO users (username, password_hash, role, is_active, created_at) "
-        "VALUES (?, ?, ?, 1, ?)",
-        (username, generate_password_hash(password), role,
-         datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-    )
-    conn.commit()
-    conn.close()
+    db = get_db()
+    try:
+        db.users.insert_one({
+            "id": next_sequence("users"),
+            "username": username,
+            "password_hash": generate_password_hash(password),
+            "role": role,
+            "is_active": True,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "auth_provider": "local",
+            "google_id": None,
+            "avatar_url": None,
+            "last_login_at": None,
+        })
+    except DuplicateKeyError:
+        raise ValueError(f"Username '{username}' is already taken.")
 
 
 def update_username(user_id, new_username):
@@ -248,59 +233,50 @@ def update_username(user_id, new_username):
     existing = get_user_by_username(new_username)
     if existing and existing["id"] != user_id:
         raise ValueError(f"Username '{new_username}' is already taken.")
-    conn = _get_conn()
-    conn.execute("UPDATE users SET username = ? WHERE id = ?", (new_username, user_id))
-    conn.commit()
-    conn.close()
+    db = get_db()
+    try:
+        db.users.update_one({"id": user_id}, {"$set": {"username": new_username}})
+    except DuplicateKeyError:
+        raise ValueError(f"Username '{new_username}' is already taken.")
 
 
 def update_user_role(user_id, role):
     if role not in ROLES:
         raise ValueError(f"Invalid role '{role}'. Must be one of {ROLES}.")
-    conn = _get_conn()
-    conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
-    conn.commit()
-    conn.close()
+    db = get_db()
+    db.users.update_one({"id": user_id}, {"$set": {"role": role}})
 
 
 def set_user_active(user_id, is_active):
-    conn = _get_conn()
-    conn.execute("UPDATE users SET is_active = ? WHERE id = ?", (1 if is_active else 0, user_id))
-    conn.commit()
-    conn.close()
+    db = get_db()
+    db.users.update_one({"id": user_id}, {"$set": {"is_active": bool(is_active)}})
 
 
 def reset_password(user_id, new_password):
     if not new_password or len(new_password) < 6:
         raise ValueError("Password must be at least 6 characters.")
-    conn = _get_conn()
-    conn.execute(
-        "UPDATE users SET password_hash = ? WHERE id = ?",
-        (generate_password_hash(new_password), user_id),
+    db = get_db()
+    db.users.update_one(
+        {"id": user_id},
+        {"$set": {"password_hash": generate_password_hash(new_password)}},
     )
-    conn.commit()
-    conn.close()
 
 
 def delete_user(user_id):
-    conn = _get_conn()
-    conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-    conn.commit()
-    conn.close()
+    db = get_db()
+    db.users.delete_one({"id": user_id})
 
 
 def _touch_last_login(user_id):
-    conn = _get_conn()
-    conn.execute(
-        "UPDATE users SET last_login_at = ? WHERE id = ?",
-        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_id),
+    db = get_db()
+    db.users.update_one(
+        {"id": user_id},
+        {"$set": {"last_login_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}},
     )
-    conn.commit()
-    conn.close()
 
 
 def verify_login(username, password):
-    """Returns the user row (dict) on success, or None on any failure."""
+    """Returns the user dict on success, or None on any failure."""
     user = get_user_by_username((username or "").strip())
     if not user or not user["is_active"]:
         return None
@@ -322,54 +298,55 @@ def find_or_create_google_user(google_id, email, avatar_url=None):
     Returns the user dict, or None if a matched account is deactivated.
     """
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn = _get_conn()
+    db = get_db()
 
-    row = conn.execute("SELECT * FROM users WHERE google_id = ?", (google_id,)).fetchone()
-    if row:
-        user = dict(row)
+    doc = db.users.find_one({"google_id": google_id})
+    if doc:
+        user = _doc_to_dict(doc)
         if not user["is_active"]:
-            conn.close()
             return None
-        conn.execute(
-            "UPDATE users SET avatar_url = ?, last_login_at = ? WHERE id = ?",
-            (avatar_url, now, user["id"]),
+        db.users.update_one(
+            {"id": user["id"]},
+            {"$set": {"avatar_url": avatar_url, "last_login_at": now}},
         )
-        conn.commit()
-        conn.close()
         user["avatar_url"] = avatar_url
         user["last_login_at"] = now
         return user
 
-    row = conn.execute("SELECT * FROM users WHERE username = ?", (email,)).fetchone()
-    if row:
-        user = dict(row)
+    doc = db.users.find_one({"username": email})
+    if doc:
+        user = _doc_to_dict(doc)
         if not user["is_active"]:
-            conn.close()
             return None
-        conn.execute(
-            "UPDATE users SET google_id = ?, auth_provider = 'google', avatar_url = ?, "
-            "last_login_at = ? WHERE id = ?",
-            (google_id, avatar_url, now, user["id"]),
+        db.users.update_one(
+            {"id": user["id"]},
+            {"$set": {
+                "google_id": google_id, "auth_provider": "google",
+                "avatar_url": avatar_url, "last_login_at": now,
+            }},
         )
-        conn.commit()
-        conn.close()
         user.update(google_id=google_id, auth_provider="google", avatar_url=avatar_url, last_login_at=now)
         return user
 
     # Brand-new account. It still gets a (random, unusable) password hash so
-    # the NOT NULL column is satisfied; the user can set a real password
-    # later from Account Settings if they also want local sign-in.
+    # existing code that reads password_hash never hits a missing field; the
+    # user can set a real password later from Account Settings if they also
+    # want local sign-in.
     unusable_hash = generate_password_hash(secrets.token_hex(32))
     role = GOOGLE_DEFAULT_ROLE if GOOGLE_DEFAULT_ROLE in ROLES else "viewer"
-    cursor = conn.execute(
-        "INSERT INTO users (username, password_hash, role, is_active, created_at, "
-        "auth_provider, google_id, avatar_url, last_login_at) "
-        "VALUES (?, ?, ?, 1, ?, 'google', ?, ?, ?)",
-        (email, unusable_hash, role, now, google_id, avatar_url, now),
-    )
-    conn.commit()
-    new_id = cursor.lastrowid
-    conn.close()
+    new_id = next_sequence("users")
+    db.users.insert_one({
+        "id": new_id,
+        "username": email,
+        "password_hash": unusable_hash,
+        "role": role,
+        "is_active": True,
+        "created_at": now,
+        "auth_provider": "google",
+        "google_id": google_id,
+        "avatar_url": avatar_url,
+        "last_login_at": now,
+    })
     return get_user_by_id(new_id)
 
 

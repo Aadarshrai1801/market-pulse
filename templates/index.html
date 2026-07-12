@@ -72,6 +72,8 @@
           <div class="dd-section-label" id="menuAdminSectionLabel" style="display:none;">Administration</div>
           <div class="dd-item" id="menuUserManagement" style="display:none;"><span>🛡</span><span>User Management</span>
           </div>
+          <div class="dd-item" id="menuDbSettings" style="display:none;"><span>🗄</span><span>Database Settings</span>
+          </div>
 
           <div class="dd-section-label">Account</div>
           <div class="dd-item" id="menuChangePassword"><span>🔑</span><span>Account &amp; Password</span></div>
@@ -856,6 +858,26 @@
         </div>
         <button class="fetch-btn login-submit" id="cpSubmit" type="button">Save Changes</button>
         <div class="status-line" id="cpStatus" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== MODAL: DATABASE SETTINGS ===================== -->
+  <div class="modal-overlay" id="dbSettingsOverlay">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div class="modal-title"><span>🗄</span> Database Settings</div>
+        <button class="modal-close" id="closeDbSettings" type="button">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="panel-sub" style="margin-bottom:16px;">
+          MongoDB connection used for product prices and user accounts.
+          Credentials live in the server's <code>MONGODB_URI</code>
+          environment variable — not editable here, for security.
+        </div>
+        <div id="dbStatusBody"><div class="empty-state">Checking connection…</div></div>
+        <button class="fetch-btn" id="btnRefreshDbStatus" type="button" style="margin-top:16px;">⟳ Test
+          Connection</button>
       </div>
     </div>
   </div>

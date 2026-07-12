@@ -3,7 +3,7 @@ Public API of the `scraper` package - this is the only file other code
 (app.py, products_config.py) needs to import from, and its surface is
 unchanged from when this used to be a single scraper.py:
 
-    from scraper import SITE_SEARCH_CONFIG, find_product_url, get_product_details, save_to_excel
+    from scraper import SITE_SEARCH_CONFIG, find_product_url, get_product_details, save_price_record
 
 Internally, each retailer now lives in its own module
 (scraper/carrefour.py, scraper/lulu.py, etc.) with two functions:
@@ -16,10 +16,14 @@ To add a new retailer:
   2. Create scraper/<retailer>.py with find_url() and scrape().
   3. Import it below and add one line each to _FINDERS and _SCRAPERS.
 That's it - app.py and products_config.py don't need to change.
+
+Price storage lives in MongoDB (see mongo_store.py / db.py) rather than
+products.xlsx. excel_store.py is kept in the repo only as a reference for
+anyone who still wants a spreadsheet export - it isn't wired up anymore.
 """
 
 from .config import SITE_SEARCH_CONFIG
-from .excel_store import save_to_excel
+from .mongo_store import save_price_record, get_price_history
 from .utils import parse_weight_to_kg, parse_price_value
 
 from . import carrefour, lulu, barakat, kibsons, unioncoop
@@ -65,7 +69,8 @@ __all__ = [
     "SITE_SEARCH_CONFIG",
     "find_product_url",
     "get_product_details",
-    "save_to_excel",
+    "save_price_record",
+    "get_price_history",
     "parse_weight_to_kg",
     "parse_price_value",
 ]

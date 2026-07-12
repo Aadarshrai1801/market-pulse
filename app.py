@@ -9,16 +9,17 @@ import cv2
 import numpy as np
 
 from ocr.ocr import preprocess_image, run_ocr, extract_table
-from openpyxl import load_workbook
 
 from scraper import (
     SITE_SEARCH_CONFIG,
     find_product_url,
     get_product_details,
-    save_to_excel,
+    save_price_record,
+    get_price_history,
 )
 from products_config import PRODUCTS, PRODUCTS_BY_ID, RETAILER_LABELS, get_search_keyword
 from auth import auth_bp, init_auth, login_required, role_required
+from db import get_db, get_status as get_db_status
 
 app = Flask(__name__)
 
@@ -77,7 +78,6 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 RETAILERS = list(SITE_SEARCH_CONFIG.keys())
-EXCEL_PATH = os.path.join(DATA_DIR, "products.xlsx")
 
 # In-memory job store for the async fetch API - fine for single-device use
 # (resets if the app restarts, which is expected here).
@@ -95,66 +95,17 @@ def _price_to_float(text):
     m = re.search(r"(\d+(?:\.\d+)?)", text)
     return float(m.group(1)) if m else None
 
-def get_previous_price(product_id, retailer, current_price):
+def get_previous_price(product_id, retailer):
     """
     Returns the previous saved price for the same product and retailer,
     ignoring the current price if it is already the newest entry.
     """
-    if not os.path.exists(EXCEL_PATH):
-        return None
-
-    wb = load_workbook(EXCEL_PATH, read_only=True)
-    ws = wb.active
-
-    rows = list(ws.iter_rows(values_only=True)) #type: ignore
-
-    if len(rows) < 2:
-        wb.close()
-        return None
-
-    header = rows[0]
-
-    pid_idx = header.index("Product ID")
-    retailer_idx = header.index("Supermarket")
-    price_idx = header.index("Per Kg Price")
-    time_idx = header.index("Timestamp")
-
-    history = []
-
-    for row in rows[1:]:
-        if row[pid_idx] != product_id:
-            continue
-        if str(row[retailer_idx]).lower() != retailer.lower():
-            continue
-
-        price = _price_to_float(row[price_idx])
-        if price is None:
-            continue
-
-        history.append({
-            "price": price,
-            "timestamp": row[time_idx]
-        })
-
-    wb.close()
-
-    history.sort(key=lambda x: str(x["timestamp"]))
+    history = get_price_history(product_id, retailer)
 
     if len(history) < 2:
         return None
 
     return history[-2]["price"]
-
-
-def _find_col(header, *candidates):
-    """Case/spacing-tolerant column lookup - returns the index of the first
-    header cell matching any candidate name, or None if none match."""
-    normalized = [str(h).strip().lower() if h else "" for h in header]
-    for candidate in candidates:
-        target = candidate.strip().lower()
-        if target in normalized:
-            return normalized.index(target)
-    return None
 
 
 def _resolve_retailers(retailer_param):
@@ -189,11 +140,7 @@ def _scrape_one(product, retailer):
         # like-for-like.
         current_price = _price_to_float(data.get("per_kg_price"))
 
-        previous_price = get_previous_price(
-            product["id"],
-            retailer,
-            current_price
-        )
+        previous_price = get_previous_price(product["id"], retailer)
 
         data["previous_price"] = previous_price
 
@@ -215,9 +162,8 @@ def _scrape_one(product, retailer):
         data["product_label"] = product["name"]
         data["product_emoji"] = product["emoji"]
 
-        save_to_excel(
+        save_price_record(
             data,
-            filepath=EXCEL_PATH,
             product_id=product["id"],
             product_label=product["name"],
         )
@@ -261,6 +207,22 @@ def api_meta():
             for p in PRODUCTS
         ],
     })
+
+
+# ------------------------------------------------------------------
+# API: MongoDB connection status (admin-only "Database Settings" panel)
+# ------------------------------------------------------------------
+
+@app.route("/api/admin/db/status")
+@role_required("admin")
+def api_db_status():
+    """
+    Live health-check of the MongoDB connection used for product prices and
+    user accounts, plus a few collection counts. Re-checks the connection
+    on every call rather than caching, so this doubles as the "Test
+    Connection" button's endpoint.
+    """
+    return jsonify({"ok": True, "status": get_db_status()})
 
 
 # ------------------------------------------------------------------
@@ -419,70 +381,39 @@ def api_history():
         "counts": {"dates": 0, "products": 0, "retailers": 0},
     }
 
-    if not os.path.exists(EXCEL_PATH):
-        return jsonify(empty)
+    query = {}
+    if product_param != "all":
+        query["product_id"] = product_param
+    if retailer_param != "all":
+        query["supermarket"] = retailer_param
 
-    wb = load_workbook(EXCEL_PATH, read_only=True)
-    sheet = wb.active
+    db = get_db()
 
-    header = [c.value for c in next(sheet.iter_rows(min_row=1, max_row=1))] #type: ignore
-
-    try:
-        idx = {name: header.index(name) for name in [
-            "Product ID", "Product Label", "Per Kg Price",
-            "Supermarket", "Timestamp",
-        ]}
-    except ValueError:
-        # old-format workbook without Product ID/Label columns
-        return jsonify(empty)
-
-    # Origin column name isn't guaranteed, so try a few likely variants.
-    # If none of these match your actual header, check products.xlsx and
-    # add the exact text here.
-    origin_idx = _find_col(
-        header,
-        "Country Of Origin", "Country of Origin", "Origin", "Country",
-    )
-
-    # cell[key=(product_id, retailer)][date_iso] = latest price that day
+    # cell[key=(product_id, retailer)][date_iso] = price that day. Each
+    # scrape upserts by (product_id, supermarket, date), so there's at most
+    # one document per day already - no "latest wins" merge needed here.
     cells = {}
     date_set = set()
 
-    for row in sheet.iter_rows(min_row=2): #type: ignore
-        values = [c.value for c in row]
-        if len(values) <= max(idx.values()):
-            continue
-
-        product_id = values[idx["Product ID"]]
-        product_label = values[idx["Product Label"]]
-        retailer = values[idx["Supermarket"]]
-        price_text = values[idx["Per Kg Price"]]
-        timestamp = values[idx["Timestamp"]]
-        origin = values[origin_idx] if origin_idx is not None and len(values) > origin_idx else None
+    for doc in db.price_history.find(query):
+        product_id = doc.get("product_id")
+        product_label = doc.get("product_label")
+        retailer = doc.get("supermarket")
+        timestamp = doc.get("timestamp")
+        origin = doc.get("country_of_origin")
 
         if not product_id or not retailer or not timestamp:
             continue
-        if product_param != "all" and product_id != product_param:
-            continue
-        if retailer_param != "all" and retailer != retailer_param:
-            continue
 
-        try:
-            date_iso = str(timestamp)[:10]
-        except Exception:
-            continue
-
-        price = _price_to_float(price_text)
+        date_iso = str(timestamp)[:10]
+        price = _price_to_float(doc.get("per_kg_price"))
         date_set.add(date_iso)
 
         key = (product_id, retailer)
         cells.setdefault(key, {"product_label": product_label, "prices": {}, "origins": {}})
-        # later rows overwrite earlier ones for the same day -> "latest wins"
         cells[key]["prices"][date_iso] = price
         if origin:
             cells[key]["origins"][date_iso] = str(origin).strip()
-
-    wb.close()
 
     dates = sorted(date_set)
 
