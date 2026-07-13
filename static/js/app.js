@@ -1074,14 +1074,7 @@ async function fetchLatestPrices() {
     }
 
     let currentJob = job;
-    const maxPolls = 400; // ~8 min ceiling at 1.2s/poll - matches server-side watchdog headroom
-    let pollCount = 0;
     while (currentJob.status !== 'done') {
-      if (++pollCount > maxPolls) {
-        statusLine.classList.add('error');
-        statusLine.textContent = 'Gave up waiting on this fetch - it may still finish server-side. Check back or try a smaller selection (single retailer/product).';
-        return;
-      }
       await new Promise((resolve) => setTimeout(resolve, 1200));
       currentJob = await pollJob(currentJob.job_id);
       console.log(`[MarketPulse] GET /api/jobs/${currentJob.job_id} →`, currentJob);

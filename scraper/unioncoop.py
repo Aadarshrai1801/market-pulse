@@ -96,7 +96,7 @@ def scrape(url):
 
         browser = p.chromium.launch(
             headless=True,
-            args=["--disable-dev-shm-usage", "--disable-gpu", "--no-sandbox"],
+            channel="chrome"
         )
 
         context = browser.new_context(

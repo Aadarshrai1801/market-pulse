@@ -2,7 +2,6 @@ import os
 import re
 import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timedelta
 import werkzeug
 from flask import Flask, request, jsonify, render_template
@@ -201,38 +200,6 @@ def _scrape_one(product, retailer):
         }
 
 
-# A single stuck lookup (Chrome hangs, site serves an endless bot-check,
-# etc.) used to be able to wedge an entire job forever - _run_fetch_job's
-# loop would just sit on that one item, "status" would never become
-# "done", and the frontend's poll loop has no timeout of its own either,
-# so it'd spin showing "Fetching..." indefinitely with no error ever
-# surfacing. This wraps every lookup in a hard ceiling so the job (and the
-# frontend) always gets an answer, even if that answer is "this one failed".
-SCRAPE_WATCHDOG_SECONDS = 150
-_scrape_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="scrape-watchdog")
-
-
-def _scrape_one_with_watchdog(product, retailer):
-    future = _scrape_executor.submit(_scrape_one, product, retailer)
-    try:
-        return future.result(timeout=SCRAPE_WATCHDOG_SECONDS)
-    except FutureTimeoutError:
-        # The runaway thread (and its browser) is left to finish on its own
-        # internal timeouts in the background - we just stop waiting on it
-        # here so the rest of the job can proceed.
-        return {
-            "ok": False,
-            "supermarket": retailer,
-            "product_id": product["id"],
-            "product_label": product["name"],
-            "product_emoji": product.get("emoji", "🛒"),
-            "error": (
-                f"Timed out after {SCRAPE_WATCHDOG_SECONDS}s - the site may be "
-                "slow, blocking this server, or unreachable."
-            ),
-        }
-
-
 # ------------------------------------------------------------------
 # Pages
 # ------------------------------------------------------------------
@@ -347,7 +314,7 @@ def api_fetch():
         return jsonify({"ok": False, "error": f"Unknown product '{product_param}'."}), 400
 
     results = [
-        _scrape_one_with_watchdog(product, retailer)
+        _scrape_one(product, retailer)
         for product in products
         for retailer in retailers
     ]
@@ -366,7 +333,7 @@ def api_fetch():
 def _run_fetch_job(job_id, retailers, products):
     for product in products:
         for retailer in retailers:
-            result = _scrape_one_with_watchdog(product, retailer)
+            result = _scrape_one(product, retailer)
 
             with JOBS_LOCK:
                 job = JOBS.get(job_id)

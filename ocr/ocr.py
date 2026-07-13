@@ -52,27 +52,12 @@ try:
 except Exception:
     GPU_AVAILABLE = False
 
-# PaddleOCR's models (~150-300MB in RAM) used to load the instant this
-# module was imported - which happens at app.py's very top, before the
-# server even starts handling requests. On memory-constrained hosts (e.g.
-# Render's free/starter tiers) that permanently eats into the same RAM
-# budget Chromium needs for scraping, even on requests that never touch
-# OCR at all. Loading it lazily - only on the first actual /api/ocr call -
-# means a plain price-fetch never has to compete with it for memory.
-_OCR_ENGINE = None
-
-
-def _get_ocr_engine():
-    global _OCR_ENGINE
-    if _OCR_ENGINE is None:
-        logger.info("Loading PaddleOCR model (first use)...")
-        _OCR_ENGINE = PaddleOCR(
-            use_angle_cls=True,
-            lang="en",
-            use_gpu=GPU_AVAILABLE,
-            show_log=False
-        )
-    return _OCR_ENGINE
+OCR_ENGINE = PaddleOCR(
+    use_angle_cls=True,
+    lang="en",
+    use_gpu=GPU_AVAILABLE,
+    show_log=False
+)
 
 from difflib import get_close_matches
 
@@ -503,7 +488,7 @@ def run_ocr(processed_img: np.ndarray,
     logger.info("Running PaddleOCR...")
 
     try:
-        ocr_outputs = _get_ocr_engine().ocr(processed_img, cls=True)
+        ocr_outputs = OCR_ENGINE.ocr(processed_img, cls=True)
     except Exception as e:
         logger.exception(f"OCR failed: {e}")
         raise RuntimeError(f"PaddleOCR execution failed: {e}")
