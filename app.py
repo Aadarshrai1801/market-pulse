@@ -626,5 +626,3 @@ if __name__ == "__main__":
     # block never runs on the server - debug=True here is safe precisely
     # because it's local-only.
     app.run(host="127.0.0.1", port=int(os.environ.get("PORT", 5000)), debug=True, threaded=True)
-
-app = app

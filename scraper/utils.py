@@ -13,17 +13,14 @@ STEALTH_USER_AGENT = (
 
 
 def launch_stealth_browser(playwright):
-    """
-    Launch a headless Chrome browser + context set up to look like an
-    ordinary desktop browser: fixed user-agent/viewport/locale, and
-    navigator.webdriver hidden so sites are less likely to flag us as a
-    bot. Used by every retailer except Barakat's search step, which
-    intentionally uses a bare page with no custom context.
-
-    Returns (browser, context, page). The caller owns closing `browser`
-    when done (closing the browser also closes its context/page).
-    """
-    browser = playwright.chromium.launch(headless=True, channel="chrome")
+    browser = playwright.chromium.launch(
+        headless=True,
+        args=[
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+        ],
+    )
 
     context = browser.new_context(
         user_agent=STEALTH_USER_AGENT,
@@ -31,9 +28,11 @@ def launch_stealth_browser(playwright):
         locale="en-US",
     )
 
-    context.add_init_script(
-        "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-    )
+    context.add_init_script("""
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined
+        });
+    """)
 
     page = context.new_page()
 
