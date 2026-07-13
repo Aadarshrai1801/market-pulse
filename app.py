@@ -19,7 +19,16 @@ from scraper import (
     save_latest_fetch, 
     get_latest_fetch,
 )
-from products_config import PRODUCTS, PRODUCTS_BY_ID, RETAILER_LABELS, get_search_keyword
+from products_config import (
+    PRODUCTS,
+    PRODUCTS_BY_ID,
+    RETAILER_LABELS,
+    get_search_keyword,
+    get_all_products,
+    get_all_products_by_id,
+    add_custom_product,
+    delete_custom_product,
+)
 from auth import auth_bp, init_auth, login_required, role_required
 from db import get_db, get_status as get_db_status
 
@@ -120,8 +129,8 @@ def _resolve_retailers(retailer_param):
 
 def _resolve_products(product_param):
     if not product_param or product_param == "all":
-        return PRODUCTS
-    p = PRODUCTS_BY_ID.get(product_param)
+        return get_all_products()
+    p = get_all_products_by_id().get(product_param)
     return [p] if p else []
 
 
@@ -214,10 +223,52 @@ def api_meta():
             for r in RETAILERS
         ],
         "products": [
-            {"id": p["id"], "name": p["name"], "emoji": p["emoji"]}
-            for p in PRODUCTS
+            {"id": p["id"], "name": p["name"], "emoji": p["emoji"], "custom": bool(p.get("custom"))}
+            for p in get_all_products()
         ],
     })
+
+
+# ------------------------------------------------------------------
+# API: add/remove custom products (shown in every dropdown + scrapable
+# immediately, since get_search_keyword() falls back to the product name
+# for any retailer without an explicit keyword override)
+# ------------------------------------------------------------------
+
+@app.route("/api/products", methods=["POST"])
+@role_required("editor", "admin")
+def api_add_product():
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get("name") or "").strip()
+    emoji = (payload.get("emoji") or "").strip()
+
+    if not name:
+        return jsonify({"ok": False, "error": "Product name is required."}), 400
+
+    try:
+        product = add_custom_product(name, emoji)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except RuntimeError as e:
+        # MongoDB not configured/reachable - add_custom_product's get_db() raises this
+        return jsonify({"ok": False, "error": f"Could not save product: {e}"}), 503
+
+    return jsonify({"ok": True, "product": product})
+
+
+@app.route("/api/products/<product_id>", methods=["DELETE"])
+@role_required("editor", "admin")
+def api_delete_product(product_id):
+    try:
+        deleted = delete_custom_product(product_id)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({"ok": False, "error": f"Could not delete product: {e}"}), 503
+
+    if not deleted:
+        return jsonify({"ok": False, "error": "Product not found."}), 404
+    return jsonify({"ok": True})
 
 
 # ------------------------------------------------------------------
@@ -428,9 +479,10 @@ def api_history():
 
     dates = sorted(date_set)
 
+    all_products_by_id = get_all_products_by_id()
     rows = []
     for (product_id, retailer), info in sorted(cells.items(), key=lambda kv: (kv[1]["product_label"] or "", kv[0][1])):
-        product = PRODUCTS_BY_ID.get(product_id, {})
+        product = all_products_by_id.get(product_id, {})
         rows.append({
             "product_id": product_id,
             "product_label": info["product_label"] or product.get("name", product_id),

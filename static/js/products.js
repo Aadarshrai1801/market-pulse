@@ -1,4 +1,5 @@
 import { appState, DEFAULT_PRODUCTS, PRESETS, saveState, setStatus } from './utils.js';
+import { createProduct, deleteProduct } from './api.js';
 
 const TAG_COLORS = ['#3FA7FF', '#4FD1A5', '#F0A63C', '#c19bee', '#E2685E', '#22D3EE', '#f472b6', '#8dd48a'];
 
@@ -38,22 +39,38 @@ export function renderPresets() {
   container.innerHTML = PRESETS.filter((product) => !active.has(product.id)).map((product) => `<span class="preset-chip" data-id="${product.id}" data-emoji="${product.emoji}">${product.emoji} ${product.name}</span>`).join('');
 }
 
-export function addProduct() {
+export async function addProduct() {
   const nameInput = document.getElementById('newName');
   const emojiInput = document.getElementById('newEmoji');
   const name = nameInput?.value.trim();
   const emoji = emojiInput?.value.trim() || '🛒';
   if (!name) return;
-  if (appState.products.some((product) => product.id.toLowerCase() === name.toLowerCase())) {
+  if (appState.products.some((product) => (product.name || product.id).toLowerCase() === name.toLowerCase())) {
     setStatus('That product is already tracked.', 'err');
-    return;
+    return false;
   }
-  appState.products.push({ id: name.toLowerCase().replace(/\s+/g, '_'), name, emoji });
-  saveState();
-  renderProductTags();
-  renderProductSelect();
-  renderPresets();
-  setStatus(`✓ ${name} added to the tracked products`, 'ok');
+
+  try {
+    // Saved server-side (MongoDB) so it also shows up in the Fetch &
+    // Analyse tab's dropdown (which reads from /api/meta) and is
+    // immediately scrapable - not just added to this browser's local list.
+    const product = await createProduct(name, emoji);
+    appState.products.push(product);
+    if (!appState.meta.products.some((p) => p.id === product.id)) {
+      appState.meta.products = [...appState.meta.products, product];
+    }
+    saveState();
+    renderProductTags();
+    renderProductSelect();
+    renderPresets();
+    if (nameInput) nameInput.value = '';
+    if (emojiInput) emojiInput.value = '';
+    setStatus(`✓ ${name} added — now available in Fetch & Analyse`, 'ok');
+    return true;
+  } catch (error) {
+    setStatus(`✗ ${error.message}`, 'err');
+    return false;
+  }
 }
 
 export function resetProducts() {
@@ -65,11 +82,21 @@ export function resetProducts() {
   setStatus('Products reset to defaults.', 'ok');
 }
 
-export function removeProduct(index) {
+export async function removeProduct(index) {
   const [removed] = appState.products.splice(index, 1);
   saveState();
   renderProductTags();
   renderProductSelect();
   renderPresets();
+
+  if (removed?.custom) {
+    try {
+      await deleteProduct(removed.id);
+      appState.meta.products = appState.meta.products.filter((p) => p.id !== removed.id);
+    } catch (error) {
+      setStatus(`Removed locally, but couldn't delete from the server: ${error.message}`, 'err');
+      return;
+    }
+  }
   setStatus(`Removed ${removed?.name || 'product'} from the list.`, '');
 }

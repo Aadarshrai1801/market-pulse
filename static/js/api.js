@@ -174,6 +174,26 @@ export async function loadMeta() {
   return appState.meta;
 }
 
+export async function createProduct(name, emoji) {
+  const response = await fetch(`${API_BASE}/api/products`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, emoji }),
+  });
+  await handleAuthRedirect(response);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to add product.');
+  return data.product;
+}
+
+export async function deleteProduct(productId) {
+  const response = await fetch(`${API_BASE}/api/products/${encodeURIComponent(productId)}`, { method: 'DELETE' });
+  await handleAuthRedirect(response);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to delete product.');
+  return true;
+}
+
 export async function fetchPrices(payload) {
   const response = await fetch(`${API_BASE}/api/fetch`, {
     method: 'POST',

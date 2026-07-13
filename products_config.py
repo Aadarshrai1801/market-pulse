@@ -1,7 +1,19 @@
-# Canonical product catalog shown in the frontend dropdown.
-#
-# The frontend ALWAYS shows the same product names.
-# Each supermarket can use its own search keyword internally.
+"""
+Canonical product catalog shown in the frontend dropdown.
+
+The frontend ALWAYS shows the same product names.
+Each supermarket can use its own search keyword internally.
+
+PRODUCTS below is the built-in, hardcoded catalog. On top of it, users can
+add their own products from the "Products" tab in the UI - those are
+persisted in the `products` collection in MongoDB (see db.py) rather than
+in this file, so they survive restarts/redeploys without editing code.
+get_all_products()/get_all_products_by_id() are what the rest of the app
+(app.py's /api/meta and the scraper job resolver) should use - they merge
+the built-in list below with whatever custom products are in MongoDB.
+"""
+
+import re
 
 PRODUCTS = [
     {
@@ -121,3 +133,79 @@ def get_search_keyword(product, retailer):
     Falls back to the frontend product name if no retailer-specific keyword exists.
     """
     return product.get("keywords", {}).get(retailer, product["name"])
+
+
+# ------------------------------------------------------------------
+# Custom (user-added) products, persisted in MongoDB
+# ------------------------------------------------------------------
+
+def _slugify(name):
+    slug = re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
+    return slug or "product"
+
+
+def get_custom_products():
+    """
+    Returns user-added products from the `products` MongoDB collection.
+    Returns an empty list (rather than raising) if MongoDB isn't configured
+    or reachable, so /api/meta and the scraper still work with just the
+    built-in catalog when Mongo is down.
+    """
+    from db import get_db
+    try:
+        db = get_db()
+        return list(db.products.find({}, {"_id": 0}))
+    except Exception:
+        return []
+
+
+def get_all_products():
+    """Built-in PRODUCTS + whatever custom products are stored in MongoDB."""
+    return PRODUCTS + get_custom_products()
+
+
+def get_all_products_by_id():
+    return {p["id"]: p for p in get_all_products()}
+
+
+def add_custom_product(name, emoji=None):
+    """
+    Adds a new user-defined product. No per-retailer keyword mapping is
+    stored - get_search_keyword() already falls back to the product name
+    for any retailer without an explicit override, which is exactly what
+    a freshly-added product needs to be scrapable immediately.
+    """
+    from db import get_db
+
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Product name is required.")
+    if len(name) > 60:
+        raise ValueError("Product name is too long.")
+
+    product_id = _slugify(name)
+    existing_ids = set(PRODUCTS_BY_ID.keys()) | {p["id"] for p in get_custom_products()}
+    if product_id in existing_ids:
+        raise ValueError(f'"{name}" is already tracked.')
+
+    doc = {
+        "id": product_id,
+        "name": name,
+        "emoji": (emoji or "").strip() or "🛒",
+        "keywords": {},
+        "custom": True,
+    }
+    db = get_db()
+    db.products.insert_one(dict(doc))
+    return doc
+
+
+def delete_custom_product(product_id):
+    """Deletes a custom product. Built-in products can't be deleted this way."""
+    from db import get_db
+
+    if product_id in PRODUCTS_BY_ID:
+        raise ValueError("Built-in products can't be deleted.")
+    db = get_db()
+    result = db.products.delete_one({"id": product_id, "custom": True})
+    return result.deleted_count > 0

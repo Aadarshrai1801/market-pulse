@@ -1174,25 +1174,34 @@ function wireCsvCopyButtons() {
 /* ============================== PRODUCTS TAB ============================== */
 
 function bindProductsTab() {
-  document.getElementById('btnAddProduct')?.addEventListener('click', () => { addProduct(); refreshProductDependents(); });
-  document.getElementById('btnResetProducts')?.addEventListener('click', () => { resetProducts(); refreshProductDependents(); });
+  const addAndRefresh = async () => { await addProduct(); refreshProductDependents(); renderFetchDropdowns(); };
+
+  document.getElementById('btnAddProduct')?.addEventListener('click', addAndRefresh);
+  document.getElementById('btnResetProducts')?.addEventListener('click', () => { resetProducts(); refreshProductDependents(); renderFetchDropdowns(); });
   document.getElementById('newName')?.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') { event.preventDefault(); addProduct(); refreshProductDependents(); }
+    if (event.key === 'Enter') { event.preventDefault(); addAndRefresh(); }
   });
-  document.getElementById('prodTags')?.addEventListener('click', (event) => {
+  document.getElementById('prodTags')?.addEventListener('click', async (event) => {
     const button = event.target.closest('button[data-index]');
-    if (button) { removeProduct(Number(button.getAttribute('data-index'))); refreshProductDependents(); }
+    if (!button) return;
+    await removeProduct(Number(button.getAttribute('data-index')));
+    refreshProductDependents();
+    renderFetchDropdowns();
   });
-  document.getElementById('presetRow')?.addEventListener('click', (event) => {
+  document.getElementById('presetRow')?.addEventListener('click', async (event) => {
     const chip = event.target.closest('span[data-id]');
     if (!chip) return;
-    const id = chip.getAttribute('data-id');
+    const name = chip.textContent.trim().replace(/^\S+\s*/, '') || chip.getAttribute('data-id');
     const emoji = chip.getAttribute('data-emoji');
-    if (appState.products.some((p) => p.id === id)) return;
-    appState.products.push({ id, name: id.replace(/_/g, ' '), emoji });
-    saveState();
+    const nameInput = document.getElementById('newName');
+    const emojiInput = document.getElementById('newEmoji');
+    // Reuse addProduct() so presets go through the same backend call as a
+    // manually-typed product (and therefore also land in Fetch & Analyse).
+    if (nameInput) nameInput.value = name;
+    if (emojiInput) emojiInput.value = emoji || '';
+    await addProduct();
     refreshProductDependents();
-    setStatus(`✓ ${id} added`, 'ok');
+    renderFetchDropdowns();
   });
 }
 
