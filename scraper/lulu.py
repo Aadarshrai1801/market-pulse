@@ -39,12 +39,12 @@ def find_url(product_name):
         page.goto(
             search_url,
             wait_until="domcontentloaded",
-            timeout=60000
+            timeout=600000
         )
 
         page.wait_for_selector(
             config["result_selector"],
-            timeout=15000
+            timeout=150000
         )
 
         links = page.locator(config["result_selector"])

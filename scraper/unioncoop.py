@@ -39,7 +39,7 @@ def find_url(product_name):
         page.goto(
             search_url,
             wait_until="domcontentloaded",
-            timeout=60000
+            timeout=600000
         )
 
         page.wait_for_timeout(4000)

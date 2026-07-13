@@ -67,7 +67,7 @@ def find_url(product_name):
         browser, context, page = launch_stealth_browser(p)
 
         page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(4000)
+        page.wait_for_timeout(40000)
 
         links = page.locator(config["result_selector"])
 
