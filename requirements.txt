@@ -6,7 +6,7 @@ requests>=2.31          # used by auth.py for Google OAuth token/userinfo calls
 # --- Data storage ---
 pymongo[srv]>=4.7        # MongoDB driver (users + product price history); [srv] enables mongodb+srv:// URIs
 python-dotenv>=1.0       # loads MONGODB_URI etc. from a local .env file in dev
-openpyxl>=3.1             # still used by migrate_to_mongo.py to read your old products.xlsx once
+openpyxl>=3.1            # still used by migrate_to_mongo.py to read your old products.xlsx once
 
 # --- Scraper ---
 # Pinned exactly (not >=) to match the Dockerfile's base image tag
@@ -18,19 +18,21 @@ playwright==1.44.0
 # --- OCR endpoint (/api/ocr) ---
 opencv-python-headless>=4.9   # headless build - no GUI deps needed on a server
 numpy>=1.26
-
-# --- Production server ---
-gunicorn>=22.0           # run with: gunicorn -w 2 -b 0.0.0.0:$PORT app:app
-                          # (Windows/dev alternative: waitress)
-
-# --- NOTE ---
-# app.py imports `preprocess_image`, `run_ocr`, `extract_table`, `extract_text`,
-# `group_rows`, `detect_header_columns` from a local `ocr/ocr.py` module that
-# wasn't included in the files you uploaded. If that module itself imports an
-# OCR engine (e.g. pytesseract, easyocr, paddleocr/paddlepaddle), add that
-# package here too - otherwise the app will fail to start on a fresh install.
-
 pandas>=2.0
 
+# PaddleOCR - the OCR engine actually used by ocr/ocr.py.
+# CPU-only build (no GPU on Render/Fly free tiers) - do NOT switch this to
+# paddlepaddle-gpu, that requires CUDA and will fail to install/run here.
 paddlepaddle>=2.6
 paddleocr>=2.7
+
+# --- Production server ---
+gunicorn>=22.0           # run with: gunicorn -w 1 -b 0.0.0.0:$PORT app:app
+                          # NOTE: -w 1, not -w 2 - see "Single worker" note below
+                          # (Windows/dev alternative: waitress)
+
+# --- Worker count note ---
+# app.py's JOBS dict is in-memory (see README "Single worker" section).
+# With gunicorn -w 2+, a job started on one worker won't be visible when
+# another worker handles the /api/jobs/<id> poll request - random 404s/stuck
+# "running" state. Keep -w 1 unless JOBS is moved to Redis/a DB.
