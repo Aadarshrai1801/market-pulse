@@ -15,7 +15,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install real Google Chrome (base image only ships Chromium by default)
-RUN playwright install --with-deps chromium
+RUN playwright install --with-deps chrome
 
 # Pre-download PaddleOCR's det/rec/cls models at build time so the container
 # doesn't spend 60+ seconds fetching them on every cold start (this was

@@ -99,7 +99,7 @@ def scrape(url):
         context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
         page = context.new_page()
-        page.goto(url, wait_until="commit", timeout=60000)
+        page.goto(url, wait_until="commit", timeout=600000)
 
         # page loads content async, wait until price shows up somewhere
         try:
