@@ -30,7 +30,10 @@ def find_url(product_name):
     search_url = config["search_url"].format(query=query)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, channel="chrome")
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-dev-shm-usage", "--disable-gpu", "--no-sandbox"],
+        )
         page = browser.new_page()
 
         page.goto(search_url, wait_until="domcontentloaded", timeout=60000)

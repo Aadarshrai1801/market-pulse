@@ -14,16 +14,33 @@ STEALTH_USER_AGENT = (
 
 def launch_stealth_browser(playwright):
     """
-    Launch a headless Chrome browser + context set up to look like an
+    Launch a headless Chromium browser + context set up to look like an
     ordinary desktop browser: fixed user-agent/viewport/locale, and
     navigator.webdriver hidden so sites are less likely to flag us as a
     bot. Used by every retailer except Barakat's search step, which
     intentionally uses a bare page with no custom context.
 
+    Uses Playwright's own bundled Chromium (not channel="chrome") - it's
+    already baked into the mcr.microsoft.com/playwright/python base image,
+    has a much smaller memory footprint than real Google Chrome, and is
+    the browser Playwright is actually tested against. On memory-constrained
+    hosts (e.g. Render's free/starter tiers) real Chrome can silently stall
+    instead of erroring when it can't get enough RAM - this avoids that.
+
     Returns (browser, context, page). The caller owns closing `browser`
     when done (closing the browser also closes its context/page).
     """
-    browser = playwright.chromium.launch(headless=True, channel="chrome")
+    browser = playwright.chromium.launch(
+        headless=True,
+        args=[
+            # Docker's default /dev/shm is only 64MB - Chrome uses shared
+            # memory heavily for tab rendering and will crash/hang once it
+            # runs out. This makes it fall back to disk instead.
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--no-sandbox",
+        ],
+    )
 
     context = browser.new_context(
         user_agent=STEALTH_USER_AGENT,
