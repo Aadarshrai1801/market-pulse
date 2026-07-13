@@ -31,3 +31,6 @@ gunicorn>=22.0           # run with: gunicorn -w 2 -b 0.0.0.0:$PORT app:app
 # package here too - otherwise the app will fail to start on a fresh install.
 
 pandas>=2.0
+
+paddlepaddle>=2.6
+paddleocr>=2.7
