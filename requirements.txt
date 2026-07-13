@@ -29,3 +29,5 @@ gunicorn>=22.0           # run with: gunicorn -w 2 -b 0.0.0.0:$PORT app:app
 # wasn't included in the files you uploaded. If that module itself imports an
 # OCR engine (e.g. pytesseract, easyocr, paddleocr/paddlepaddle), add that
 # package here too - otherwise the app will fail to start on a fresh install.
+
+pandas>=2.0
