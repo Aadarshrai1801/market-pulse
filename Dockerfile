@@ -19,4 +19,4 @@ COPY . .
 # Railway/Render inject PORT at runtime; -w 1 matters because JOBS in
 # app.py is an in-memory dict - multiple worker processes would each keep
 # their own copy and job polling would break.
-CMD gunicorn -w 1 -b 0.0.0.0:${PORT:-5000} app:app
+CMD gunicorn -w 1 --timeout 120 -b 0.0.0.0:${PORT:-5000} app:app
