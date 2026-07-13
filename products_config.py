@@ -34,7 +34,7 @@ PRODUCTS = [
         "emoji": "🥔",
         "keywords": {
             "barakat": "Potatoes",
-            "kibsons": " potatoes",
+            "kibsons": " potato",
             "unioncoop": "potato",
             "carrefour": "Potato",
             "lulu": "Potato",
