@@ -1022,7 +1022,7 @@ function renderDetailTable(rows) {
   panel.style.display = 'block';
 
   const sorted = [...rows].sort((a, b) => a.product.localeCompare(b.product) || a.retailer.localeCompare(b.retailer));
-  const html = '<table class="dtbl"><thead><tr><th>Date</th><th>Product</th><th>Retailer</th><th>Price</th><th>Trend</th><th>Unit</th><th>Origin Country</th><th>Source</th><th>Fetched At</th></tr></thead><tbody>' +
+  const html = '<table class="dtbl"><thead><tr><th>Date</th><th>Product</th><th>Retailer</th><th>Price</th><th>Trend</th><th>Unit</th><th>Origin Country</th><th>Fetched At</th></tr></thead><tbody>' +
     sorted.map((item) => {
       const meta = getProductMeta(item.product);
       const verifyUrl = item.price > 0 ? buildVerifyUrl(item.retailer, meta.name || item.product) : null;
@@ -1045,7 +1045,6 @@ function renderDetailTable(rows) {
         <td>${buildTrendBadge(item)}</td>
         <td class="mu">per kg</td>
         <td><span class="origin-code" style="margin-right:6px;">${escapeHtml(normalizeCountryName(item.origin_country))}</span><span class="mu">${escapeHtml(getFullCountryName(item.origin_country))}</span></td>
-        <td>${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="mu" title="Open the scraped product page">🔗 Link</a>` : '<span class="mu">—</span>'}</td>
         <td class="mu">${escapeHtml(item.fetched_at ? new Date(item.fetched_at).toLocaleTimeString('en-AE') : '—')}</td>
       </tr>`;
     }).join('') + '</tbody></table>';
