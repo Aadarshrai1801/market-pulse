@@ -23,7 +23,7 @@ anyone who still wants a spreadsheet export - it isn't wired up anymore.
 """
 
 from .config import SITE_SEARCH_CONFIG
-from .mongo_store import save_price_record, get_price_history
+from .mongo_store import save_price_record, get_price_history, save_latest_fetch, get_latest_fetch
 from .utils import parse_weight_to_kg, parse_price_value
 
 from . import carrefour, lulu, barakat, kibsons, unioncoop
@@ -71,6 +71,8 @@ __all__ = [
     "get_product_details",
     "save_price_record",
     "get_price_history",
+    "save_latest_fetch",
+    "get_latest_fetch",
     "parse_weight_to_kg",
     "parse_price_value",
 ]

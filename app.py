@@ -16,6 +16,8 @@ from scraper import (
     get_product_details,
     save_price_record,
     get_price_history,
+    save_latest_fetch, 
+    get_latest_fetch,
 )
 from products_config import PRODUCTS, PRODUCTS_BY_ID, RETAILER_LABELS, get_search_keyword
 from auth import auth_bp, init_auth, login_required, role_required
@@ -163,6 +165,15 @@ def _scrape_one(product, retailer):
         data["product_emoji"] = product["emoji"]
 
         save_price_record(
+            data,
+            product_id=product["id"],
+            product_label=product["name"],
+        )
+        # Overwrites (rather than appends to) the one row this product+retailer
+        # has in `latest_fetch` - this is what /api/latest and the "Latest Fetch
+        # Results" table read from, so that table always shows only the newest
+        # scrape per product+retailer, persisted server-side in MongoDB.
+        save_latest_fetch(
             data,
             product_id=product["id"],
             product_label=product["name"],
@@ -445,6 +456,39 @@ def api_history():
     
 
     
+# ------------------------------------------------------------------
+# API: latest-fetch snapshot (one row per product+retailer, always the
+# most recent scrape - overwritten in place in MongoDB, not appended)
+# ------------------------------------------------------------------
+
+@app.route("/api/latest")
+@login_required
+def api_latest():
+    """
+    Backs the "Latest Fetch Results" table. Unlike /api/history (full
+    day-by-day price_history), this reads the `latest_fetch` collection,
+    which holds exactly one document per (product_id, retailer) - each
+    new scrape overwrites the previous one in place. That means this
+    table now persists in MongoDB and stays in sync across browsers/
+    devices/reloads, instead of only living in the browser's localStorage.
+    """
+    docs = get_latest_fetch()
+    rows = [
+        {
+            "product_id": doc.get("product_id"),
+            "product_label": doc.get("product_label"),
+            "supermarket": doc.get("supermarket"),
+            "per_kg_price": doc.get("per_kg_price"),
+            "country_of_origin": doc.get("country_of_origin"),
+            "url": doc.get("url"),
+            "timestamp": doc.get("timestamp"),
+            "date": doc.get("date"),
+        }
+        for doc in docs
+    ]
+    return jsonify({"ok": True, "rows": rows})
+
+
 @app.route('/api/ocr', methods=['POST'])
 @role_required("editor", "admin")
 def api_ocr_scan():

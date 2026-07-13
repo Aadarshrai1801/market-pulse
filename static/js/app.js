@@ -3,7 +3,7 @@ import {
   createRetailerPill, getProductMeta, normalizeRetailerId, normalizeProductId,
 } from './utils.js';
 import {
-  loadMeta, createJob, pollJob, loadHistory as loadHistoryApi, mapHistoryResponse, mapScrapeResult, ocrScan,
+  loadMeta, createJob, pollJob, loadHistory as loadHistoryApi, mapHistoryResponse, mapScrapeResult, ocrScan, loadLatestFetch,
   getCurrentUser, logout, updateOwnProfile, listUsers, createUser, updateUserRole, setUserActive,
   resetUserPassword, deleteUser, getUserStats, getDbStatus,
 } from './api.js';
@@ -1022,7 +1022,7 @@ function renderDetailTable(rows) {
   panel.style.display = 'block';
 
   const sorted = [...rows].sort((a, b) => a.product.localeCompare(b.product) || a.retailer.localeCompare(b.retailer));
-  const html = '<table class="dtbl"><thead><tr><th>Date</th><th>Product</th><th>Retailer</th><th>Price</th><th>Trend</th><th>Unit</th><th>Origin Country</th><th>Fetched At</th></tr></thead><tbody>' +
+  const html = '<table class="dtbl"><thead><tr><th>Date</th><th>Product</th><th>Retailer</th><th>Price</th><th>Trend</th><th>Unit</th><th>Origin Country</th><th>Source</th><th>Fetched At</th></tr></thead><tbody>' +
     sorted.map((item) => {
       const meta = getProductMeta(item.product);
       const verifyUrl = item.price > 0 ? buildVerifyUrl(item.retailer, meta.name || item.product) : null;
@@ -1045,6 +1045,7 @@ function renderDetailTable(rows) {
         <td>${buildTrendBadge(item)}</td>
         <td class="mu">per kg</td>
         <td><span class="origin-code" style="margin-right:6px;">${escapeHtml(normalizeCountryName(item.origin_country))}</span><span class="mu">${escapeHtml(getFullCountryName(item.origin_country))}</span></td>
+        <td>${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="mu" title="Open the scraped product page">🔗 Link</a>` : '<span class="mu">—</span>'}</td>
         <td class="mu">${escapeHtml(item.fetched_at ? new Date(item.fetched_at).toLocaleTimeString('en-AE') : '—')}</td>
       </tr>`;
     }).join('') + '</tbody></table>';
@@ -1148,8 +1149,8 @@ function pivotToCsv() {
 
 function detailToCsv() {
   if (!lastDetail.length) return '';
-  const headers = ['Date', 'Product', 'Retailer', 'Price (AED)', 'Unit', 'Origin Country', 'Fetched At'];
-  const rows = lastDetail.map((r) => [r.date, r.product, r.retailer, (r.price || 0).toFixed(2), r.unit || 'per kg', normalizeCountryName(r.origin_country) || '—', r.fetched_at || '']);
+  const headers = ['Date', 'Product', 'Retailer', 'Price (AED)', 'Unit', 'Origin Country', 'Source URL', 'Fetched At'];
+  const rows = lastDetail.map((r) => [r.date, r.product, r.retailer, (r.price || 0).toFixed(2), r.unit || 'per kg', normalizeCountryName(r.origin_country) || '—', r.url || '', r.fetched_at || '']);
   return toCsv(headers, rows);
 }
 
@@ -2429,14 +2430,16 @@ async function init() {
 
   refreshProductDependents();
 
-  const persisted = loadPersistedDetail();
-  if (persisted && persisted.date === todayStr() && persisted.rows.length) {
-    lastDetail = persisted.rows;
+  try {
+    lastDetail = await loadLatestFetch();
+    console.log('[MarketPulse] Loaded Latest Fetch Results from MongoDB (/api/latest):', lastDetail);
+    savePersistedDetail(lastDetail); // keep the local cache as an offline-friendly mirror only
     renderDetailTable(lastDetail);
-  } else {
-    lastDetail = [];
-    if (persisted) savePersistedDetail([]); // stale (previous day) cache — clear it out
-    // #detailPanel already starts hidden (inline style in index.html), nothing else to clear.
+  } catch (error) {
+    console.warn('[MarketPulse] Could not load latest fetch snapshot from backend, falling back to local cache:', error);
+    const persisted = loadPersistedDetail();
+    lastDetail = persisted?.rows?.length ? persisted.rows : [];
+    renderDetailTable(lastDetail);
   }
 
   document.getElementById('syncBtn')?.addEventListener('click', async (event) => {

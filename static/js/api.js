@@ -253,6 +253,37 @@ export function mapScrapeResult(item) {
     unit: 'per kg',
     currency: 'AED',
     source: 'scraper',
+    url: String(item.url || '').trim(),
+  };
+}
+
+// Latest-fetch snapshot from MongoDB (one row per product+retailer,
+// always the most recent scrape - see /api/latest and scraper/mongo_store.py's
+// save_latest_fetch). This is what backs the "Latest Fetch Results" table now,
+// instead of the old browser-only localStorage cache.
+export async function loadLatestFetch() {
+  const response = await fetch(`${API_BASE}/api/latest?_=${Date.now()}`, { cache: 'no-store' });
+  await handleAuthRedirect(response);
+  if (!response.ok) {
+    throw new Error('Unable to load the latest fetch snapshot.');
+  }
+  const data = await response.json();
+  return (data.rows || []).map((item) => mapLatestFetchRow(item));
+}
+
+export function mapLatestFetchRow(item) {
+  const price = parseFloat(String(item.per_kg_price || '').match(/\d+(?:\.\d+)?/)?.[0] || '0');
+  return {
+    date: item.date || toDateKey(new Date()),
+    fetched_at: item.timestamp || item.date || new Date().toISOString(),
+    retailer: String(item.supermarket || '').trim(),
+    product: String(item.product_label || item.product_id || '').trim(),
+    price: Number.isFinite(price) ? price : 0,
+    origin_country: String(item.country_of_origin || '').trim() || '—',
+    unit: 'per kg',
+    currency: 'AED',
+    source: 'mongodb',
+    url: String(item.url || '').trim(),
   };
 }
 

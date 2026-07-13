@@ -101,6 +101,7 @@ def ensure_indexes():
         [("product_id", 1), ("supermarket", 1), ("date", 1)], unique=True
     )
     db.price_history.create_index([("product_id", 1), ("supermarket", 1), ("timestamp", 1)])
+    db.latest_fetch.create_index([("product_id", 1), ("supermarket", 1)], unique=True)
 
 
 def get_status():
