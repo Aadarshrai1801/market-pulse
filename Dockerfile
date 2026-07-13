@@ -14,6 +14,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-download PaddleOCR's det/rec/cls models at build time so the container
+# doesn't spend 60+ seconds fetching them on every cold start (this was
+# causing the 502s: gunicorn was up and "listening" but the single worker
+# was still blocked downloading models on first import/request).
+RUN python -c "from paddleocr import PaddleOCR; PaddleOCR(lang='en', use_angle_cls=True)"
+
 COPY . .
 
 # Railway/Render inject PORT at runtime; -w 1 matters because JOBS in

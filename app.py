@@ -463,7 +463,7 @@ def api_ocr_scan():
         # 1. Read image safely without writing directly to disk
         in_memory_stream = file.read()
         nparr = np.frombuffer(in_memory_stream, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR) #type: ignore
         
         if img is None:
             return jsonify({"ok": False, "error": "Invalid image file format or corrupted payload."}), 400
@@ -474,7 +474,7 @@ def api_ocr_scan():
         # uploading at the same moment would overwrite each other's file and
         # could get OCR results from the wrong image.
         temp_path = os.path.join(UPLOAD_FOLDER, f"ocr_{uuid.uuid4().hex}.png")
-        cv2.imwrite(temp_path, img)
+        cv2.imwrite(temp_path, img) #type: ignore
 
         # 3. Fire the custom PP-OCRv5 pipeline steps
         processed_matrix = preprocess_image(temp_path)
