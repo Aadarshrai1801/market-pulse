@@ -24,7 +24,7 @@ pandas>=2.0
 # CPU-only build (no GPU on Render/Fly free tiers) - do NOT switch this to
 # paddlepaddle-gpu, that requires CUDA and will fail to install/run here.
 paddleocr==2.7.3
-paddlepaddle==2.6.1
+paddlepaddle==2.6.2
 
 # --- Production server ---
 gunicorn>=22.0           # run with: gunicorn -w 1 -b 0.0.0.0:$PORT app:app
