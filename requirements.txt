@@ -17,14 +17,31 @@ playwright==1.44.0
 
 # --- OCR endpoint (/api/ocr) ---
 opencv-python-headless>=4.9   # headless build - no GUI deps needed on a server
-numpy>=1.26
+
+# PINNED <2.0: opencv-python-headless and paddlepaddle==2.6.2 both ship
+# binaries compiled against numpy 1.x's C ABI. numpy 2.0 changed that ABI,
+# so letting pip install numpy>=2 causes "numpy.core.multiarray failed to
+# import" / "module compiled against ABI version 0x1000009 but this version
+# of numpy is 0x2000000" at gunicorn boot. Stay on the 1.x line until both
+# opencv and paddlepaddle ship numpy-2.0-compatible wheels.
+numpy>=1.26,<2.0
+
 pandas>=2.0
 
 # PaddleOCR - the OCR engine actually used by ocr/ocr.py.
 # CPU-only build (no GPU on Render/Fly free tiers) - do NOT switch this to
 # paddlepaddle-gpu, that requires CUDA and will fail to install/run here.
-paddleocr==2.7.3
+#
+# PINNED exactly (not >=): ocr.py calls PaddleOCR(use_gpu=..., show_log=...),
+# which are old-style constructor args removed in PaddleOCR 3.x. Using >=2.7
+# lets pip grab the latest 3.x release, which crashes at import time with
+# "ValueError: Unknown argument: use_gpu". Stay on the 2.x line until ocr.py
+# is updated to the new API.
+#
+# paddlepaddle==2.6.1 does NOT exist on PyPI (only 2.6.2, then jumps to 3.0+) -
+# use 2.6.2, the last published 2.x release.
 paddlepaddle==2.6.2
+paddleocr==2.7.3
 
 # --- Production server ---
 gunicorn>=22.0           # run with: gunicorn -w 1 -b 0.0.0.0:$PORT app:app
