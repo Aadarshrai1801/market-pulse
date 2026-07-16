@@ -24,49 +24,89 @@ SITE = "barakat"
 
 
 def find_url(product_name):
+    """
+    Barakat has no confirmed working search page (see config.py's note on
+    "barakat" - the search_url/result_selector there are unverified guesses).
+    Instead of searching, guess the product page URL directly from a slug
+    of the product name and its common weight-variant suffixes, then
+    verify each candidate by checking the page's <h1> actually contains
+    the product name.
+    """
     config = SITE_SEARCH_CONFIG[SITE]
+    base_url = config["base_url"].rstrip("/")
 
-    query = product_name.strip().replace(" ", "%20")
-    search_url = config["search_url"].format(query=query)
+    slug = (
+        product_name.lower()
+        .strip()
+        .replace("&", "and")
+        .replace(",", "")
+        .replace("/", "-")
+        .replace("(", "")
+        .replace(")", "")
+        .replace(" ", "-")
+    )
+
+    # Common plural names used by Barakat
+    plural_map = {
+        "potato": "potatoes",
+        "onion": "onions",
+        "red-onion": "onions",
+        "white-onion": "onions",
+    }
+
+    if slug in plural_map:
+        slug = plural_map[slug]
+
+    candidates = [
+        # plain
+        f"{base_url}/{slug}.html",
+
+        # weight variants
+        f"{base_url}/{slug}-250g.html",
+        f"{base_url}/{slug}-500g.html",
+        f"{base_url}/{slug}-750g.html",
+        f"{base_url}/{slug}-1kg.html",
+        f"{base_url}/{slug}-2kg.html",
+
+        # common config ids (discovered)
+        f"{base_url}/{slug}.html?config=84",
+        f"{base_url}/{slug}.html?config=162",
+        f"{base_url}/{slug}.html?config=187",
+        f"{base_url}/{slug}.html?config=215",
+        f"{base_url}/{slug}.html?config=537",
+    ]
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, channel="chrome")
         page = browser.new_page()
 
-        page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(50000)
-
-        links = page.locator(config["result_selector"])
-
         href = None
 
-        for i in range(links.count()):
+        for candidate in candidates:
             try:
-                link = links.nth(i)
+                response = page.goto(candidate, wait_until="domcontentloaded", timeout=15000)
 
-                text = link.inner_text().strip().lower()
-                url = link.get_attribute("href")
-
-                if not url:
+                if response is None or response.status != 200:
                     continue
 
-                if product_name.lower() in text:
-                    href = url
+                page.wait_for_timeout(1500)
+
+                if page.locator("h1").count() == 0:
+                    continue
+
+                title = page.locator("h1").first.inner_text().strip().lower()
+
+                if product_name.lower() in title:
+                    href = candidate
                     break
 
             except Exception:
                 continue
 
-        if href is None and links.count() > 0:
-            href = links.first.get_attribute("href")
-
         browser.close()
 
     if not href:
         raise ValueError(f"Couldn't find '{product_name}' on Barakat.")
-
-    if href.startswith("/"):
-        href = config["base_url"].rstrip("/") + href
 
     return href
 
@@ -163,6 +203,10 @@ def scrape(url):
         ):
             perkg = price_value / weight_kg
             per_kg_price = f"AED {perkg:.2f}/kg"
+        elif price_value is not None:
+            # No weight found on page - fall back to the raw price
+            # for this specific product instead of returning None.
+            per_kg_price = f"AED {price_value:.2f}"
 
         # ---------------------------------------------------------
         # COUNTRY OF ORIGIN

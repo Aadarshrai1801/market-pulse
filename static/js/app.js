@@ -911,7 +911,7 @@ async function loadPivot() {
 const RETAILER_SEARCH_URLS = {
   carrefour: 'https://www.carrefouruae.com/mafuae/en/search?keyword=',
   lulu: 'https://www.luluhypermarket.com/en-ae/search?q=',
-  barakat: 'https://www.barakatfresh.com/search?q=',
+  barakat: 'https://barakatfresh.ae/search?q=',
   kibsons: 'https://www.kibsons.com/search?q=',
   unioncoop: 'https://www.unioncoop.ae/en/search?q=',
 };

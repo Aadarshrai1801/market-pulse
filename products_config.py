@@ -21,7 +21,7 @@ PRODUCTS = [
         "name": "Garlic",
         "emoji": "🧄",
         "keywords": {
-            "barakat": "Garlic",
+            "barakat": "garlic",
             "kibsons": "Garlic",
             "unioncoop": "Garlic",
             "carrefour": "Garlic",
@@ -57,7 +57,7 @@ PRODUCTS = [
         "name": "Red Onion",
         "emoji": "🧅",
         "keywords": {
-            "barakat": "onions",
+            "barakat": "Red Onions",
             "kibsons": "Red Onion",
             "unioncoop": "red onion",
             "carrefour": "onion",
@@ -81,7 +81,7 @@ PRODUCTS = [
         "name": "Orange Valencia",
         "emoji": "🍊",
         "keywords": {
-            "barakat": "Valencia Orange",
+            "barakat": "Orange Valencia",
             "kibsons": "Valencia Orange",
             "unioncoop": "Orange",
             "carrefour": "Valencia Orange",
@@ -93,7 +93,7 @@ PRODUCTS = [
         "name": "Orange Navel",
         "emoji": "🍊",
         "keywords": {
-            "barakat": "Navel Orange",
+            "barakat": "orange navel",
             "kibsons": "orange",
             "unioncoop": "Orange Navel",
             "carrefour": "Orange Navel",
